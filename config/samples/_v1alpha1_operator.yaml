@@ -1,0 +1,12 @@
+apiVersion: accounts.nats.io/v1alpha1
+kind: Operator
+metadata:
+  labels:
+    app.kubernetes.io/name: operator
+    app.kubernetes.io/instance: operator-sample
+    app.kubernetes.io/part-of: nats-accounts-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: nats-accounts-operator
+  name: operator-sample
+spec:
+  # TODO(user): Add fields here
