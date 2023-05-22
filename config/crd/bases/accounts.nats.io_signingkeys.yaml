@@ -1,0 +1,146 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.1
+  creationTimestamp: null
+  name: signingkeys.accounts.nats.io
+spec:
+  group: accounts.nats.io
+  names:
+    kind: SigningKey
+    listKind: SigningKeyList
+    plural: signingkeys
+    singular: signingkey
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: SigningKey is the Schema for the signingkeys API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: SigningKeySpec defines the desired state of SigningKey
+            properties:
+              ownerRef:
+                description: OwnerRef references the owning object for this signing
+                  key. This should be one of Operator or Account. The controller will
+                  validate that this SigningKey is allowed to be owned by the referenced
+                  resource by evaluating its label selectors.
+                properties:
+                  apiVersion:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+              seedSecretName:
+                description: SeedSecretName is the name of the secret containing the
+                  seed for this signing key.
+                type: string
+              type:
+                description: Type defines which prefix to use for the signing key,
+                  supported values are "Operator" and "Account".
+                type: string
+            required:
+            - ownerRef
+            - seedSecretName
+            - type
+            type: object
+          status:
+            description: SigningKeyStatus defines the observed state of SigningKey
+            properties:
+              conditions:
+                description: Conditions contains the current status of the signing
+                  key.
+                items:
+                  description: 'Condition defines a readiness condition for a Knative
+                    resource. See: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties'
+                  properties:
+                    lastTransitionTime:
+                      description: LastTransitionTime is the last time the condition
+                        transitioned from one status to another. We use VolatileTime
+                        in place of metav1.Time to exclude this from creating equality.Semantic
+                        differences (all other things held constant).
+                      type: string
+                    message:
+                      description: A human readable message indicating details about
+                        the transition.
+                      type: string
+                    reason:
+                      description: The reason for the condition's last transition.
+                      type: string
+                    severity:
+                      description: Severity with which to treat failures of this type
+                        of condition. When this is not specified, it defaults to Error.
+                      type: string
+                    status:
+                      description: Status of the condition, one of True, False, Unknown.
+                      type: string
+                    type:
+                      description: Type of condition.
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              keyPair:
+                description: KeyPair contains the public and private key information
+                  for this signing key.
+                properties:
+                  publicKey:
+                    type: string
+                  seedSecretName:
+                    type: string
+                required:
+                - publicKey
+                - seedSecretName
+                type: object
+              ownerRef:
+                description: OwnerRef references the owning object for this signing
+                  key. This should be one of Operator or Account.
+                properties:
+                  apiVersion:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                  uid:
+                    description: UID is a type that holds unique ID values, including
+                      UUIDs.  Because we don't ONLY use UUIDs, this is an alias to
+                      string.  Being a type captures intent and helps make sure that
+                      UIDs and names do not get conflated.
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -31,4 +31,12 @@ resources:
   kind: User
   path: github.com/versori-oss/nats-account-operator/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: accounts.nats.io
+  kind: SigningKey
+  path: github.com/versori-oss/nats-account-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

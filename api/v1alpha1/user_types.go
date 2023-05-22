@@ -26,25 +26,81 @@ SOFTWARE.
 package v1alpha1
 
 import (
+	"github.com/versori-oss/nats-account-operator/pkg/apis"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // UserSpec defines the desired state of User
 type UserSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// SigningKey is the reference to the SigningKey that will be used to sign JWTs for this User. The controller
+	// will check the owner of the SigningKey is an Account, and that this User can be managed by that Account
+	// following its namespace and label selector restrictions.
+	SigningKey SigningKeyReference `json:"signingKey"`
 
-	// Foo is an example field of User. Edit user_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// JWTSecretName is the name of the Secret that will be created to store the JWT for this User.
+	JWTSecretName string `json:"jwtSecretName"`
+
+	// SeedSecretName is the name of the Secret that will be created to store the seed for this User.
+	SeedSecretName string `json:"seedSecretName"`
+
+	// CredentialsSecretName is the name of the Secret that will be created to store the credentials for this User.
+	CredentialsSecretName string `json:"credentialsSecretName"`
+
+	// Permissions is a JWT claim for the User.
+	Permissions UserPermissions `json:"permissions"`
+
+	// Limits is a JWT claim for the User.
+	Limits UserLimits `json:"limits"`
+
+	// BearerToken is a JWT claim for the User.
+	BearerToken bool `json:"bearerToken"`
+}
+
+type UserPermissions struct {
+	Pub  Permission     `json:"pub"`
+	Sub  Permission     `json:"sub"`
+	Resp RespPermission `json:"resp"`
+}
+
+type Permission struct {
+	Allow []string `json:"allow"`
+	Deny  []string `json:"deny"`
+}
+
+type RespPermission struct {
+	Max int `json:"max"`
+	TTL int `json:"ttl"`
+}
+
+type UserLimits struct {
+	Max     int `json:"max"`
+	Payload int `json:"payload"`
+
+	// Src is a comma-separated list of CIDR blocks
+	Src string `json:"src"`
+
+	// Times is a list of start/end times in the format "15:04:05".
+	Times []StartEndTime `json:"times"`
+}
+
+type StartEndTime struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
 }
 
 // UserStatus defines the observed state of User
 type UserStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	KeyPair    *KeyPair                 `json:"keyPair,omitempty"`
+	AccountRef *InferredObjectReference `json:"accountRef,omitempty"`
+	Conditions apis.Conditions          `json:"conditions,omitempty"`
+}
+
+func (s *UserStatus) GetConditions() apis.Conditions {
+	return s.Conditions
+}
+
+func (s *UserStatus) SetConditions(conditions apis.Conditions) {
+	s.Conditions = conditions
 }
 
 //+kubebuilder:object:root=true

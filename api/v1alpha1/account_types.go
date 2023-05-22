@@ -26,25 +26,117 @@ SOFTWARE.
 package v1alpha1
 
 import (
+	"github.com/versori-oss/nats-account-operator/pkg/apis"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+type ImportExportType string
+
+const (
+	ImportExportTypeStream  ImportExportType = "Stream"
+	ImportExportTypeService ImportExportType = "Service"
+)
+
+type ResponseType string
+
+const (
+	ResponseTypeSingleton ResponseType = "Singleton"
+	ResponseTypeStream    ResponseType = "Stream"
+	ResponseTypeChunked   ResponseType = "Chunked"
+)
 
 // AccountSpec defines the desired state of Account
 type AccountSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// SigningKey is the reference to the SigningKey that will be used to sign JWTs for this Account. The controller
+	// will check the owner of the SigningKey is an Operator, and that this Account can be managed by that Operator
+	// following its namespace and label selector restrictions.
+	SigningKey SigningKeyReference `json:"signingKey"`
 
-	// Foo is an example field of Account. Edit account_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// UsersNamespaceSelector defines which namespaces are allowed to contain Users managed by this Account. The default
+	// restricts to the same namespace as the Account, it can be set to an empty selector `{}` to allow all namespaces.
+	UsersNamespaceSelector *metav1.LabelSelector `json:"usersNamespaceSelector,omitempty"`
+
+	// UsersSelector defines which Users are allowed to be managed by this Account. The default implies no label
+	// selector and all User resources will be allowed (subject to the UsersNamespaceSelector above).
+	UsersSelector *metav1.LabelSelector `json:"usersSelector,omitempty"`
+
+	// JWTSecretName is the name of the Secret that will be created to hold the JWT signing key for this Account.
+	JWTSecretName string `json:"jwtSecretName"`
+
+	// SeedSecretName is the name of the Secret that will be created to hold the seed for this Account.
+	SeedSecretName string `json:"seedSecretName"`
+
+	// SigningKeysSelector is the label selector to restrict which SigningKeys can be used to sign JWTs for this
+	// Account. SigningKeys must be in the same namespace as the Account.
+	SigningKeysSelector *metav1.LabelSelector `json:"signingKeysSelector,omitempty"`
+
+	// Imports is a JWT claim for the Account.
+	Imports []AccountImport `json:"imports,omitempty"`
+
+	// Exports is a JWT claim for the Account.
+	Exports []AccountExport `json:"exports,omitempty"`
+
+	// Identities is a JWT claim for the Account.
+	Identities []Identity `json:"identities,omitempty"`
+
+	// Limits is a JWT claim for the Account.
+	Limits AccountLimits `json:"limits"`
+}
+
+type AccountImport struct {
+	Name    string           `json:"name"`
+	Subject string           `json:"subject"`
+	Account string           `json:"account"`
+	Token   string           `json:"token"`
+	To      string           `json:"to"`
+	Type    ImportExportType `json:"type"`
+}
+
+type AccountExport struct {
+	Name                 string                 `json:"name"`
+	Subject              string                 `json:"subject"`
+	Type                 ImportExportType       `json:"type"`
+	TokenReq             bool                   `json:"tokenReq"`
+	ResponseType         ResponseType           `json:"responseType"`
+	ServiceLatency       *AccountServiceLatency `json:"serviceLatency,omitempty"`
+	AccountTokenPosition int                    `json:"accountTokenPosition"`
+}
+
+type AccountServiceLatency struct {
+	Sampling int    `json:"sampling"`
+	Results  string `json:"results"`
+}
+
+type AccountLimits struct {
+	Subs      int  `json:"subs"`
+	Conn      int  `json:"conn"`
+	Leaf      int  `json:"leaf"`
+	Imports   int  `json:"imports"`
+	Exports   int  `json:"exports"`
+	Data      int  `json:"data"`
+	Payload   int  `json:"payload"`
+	Wildcards bool `json:"wildcards"`
 }
 
 // AccountStatus defines the observed state of Account
 type AccountStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	KeyPair     *KeyPair                   `json:"keyPair,omitempty"`
+	SigningKeys []SigningKeyEmbeddedStatus `json:"signingKeys,omitempty"`
+	OperatorRef *InferredObjectReference   `json:"operatorRef,omitempty"`
+	Conditions  apis.Conditions            `json:"conditions,omitempty"`
+}
+
+func (s *AccountStatus) GetConditions() apis.Conditions {
+	return s.Conditions
+}
+
+func (s *AccountStatus) SetConditions(conditions apis.Conditions) {
+	s.Conditions = conditions
+}
+
+type OperatorRef struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
 }
 
 //+kubebuilder:object:root=true

@@ -3,4 +3,5 @@ resources:
 - _v1alpha1_operator.yaml
 - _v1alpha1_account.yaml
 - _v1alpha1_user.yaml
+- _v1alpha1_signingkey.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples

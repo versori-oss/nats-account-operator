@@ -1,6 +1,6 @@
 # NATS Account Operator Specification
 
-This document describes the CRD specifications for th  NATS Account Kubernetes Operator.
+This document describes the CRD specifications for the NATS Account Kubernetes Operator.
 
 ## CRD Types
 
@@ -15,12 +15,14 @@ metadata:
 spec:
   # The secret containing the operator's JWT in a file named nats.jwt
   jwtSecretName: nats-operator-jwt
+  
   # The secret containing the operator's identity seed in a file named nats.seed
   seedSecretName: nats-operator-seed
 
   # Selector limiting which Namespaces Accounts may be defined in for this Operator. A null selector applies only to the 
   # current namespace.
   accountsNamespaceSelector: {}
+  
   # Selector limiting which Accounts may be defined for this Operator. A null selector will allow all Accounts.
   accountsSelector: {}
   
@@ -32,6 +34,7 @@ spec:
   systemAccountRef:
     name: sys
     namespace: "" # defaults to the current Namespace for this Operator resource.
+  
   identities:
     - id: ""
       proof: ""
@@ -42,15 +45,15 @@ status:
   signingKeys:
     - name: ""
       keyPair: {} # See KeyPair duck type below
-  systemAccount: ""
+  systemAccountRef:
+    name: ""
+    namespace: ""
   conditions:
     - type: Ready
       status: "True"
     - type: SystemAccountResolved
       status: "True"
     - type: SystemAccountReady
-      status: "True"
-    - type: SigningKeysUpToDate
       status: "True"
     - type: JWTSecretReady
       status: "True"
@@ -86,6 +89,8 @@ spec:
   jwtSecretName: nats-account-sys-jwt
   # The secret containing the account's identity seed in a file named nats.seed
   seedSecretName: nats-account-sys-seed
+  # The selector limiting which SigningKeys may be used to sign JWTs for this Account. All SigningKeys must be in the 
+  # same namespace as the Account.
   signingKeysSelector: {}
   imports:
     - name: ""
@@ -129,7 +134,9 @@ status:
   signingKeys:
     - name: ""
       keyPair: {} # See KeyPair duck type below
-  operator: ""
+  operatorRef:
+    name: ""
+    namespace: ""
   conditions:
     - type: Ready
       status: "True"
@@ -191,22 +198,19 @@ spec:
   bearerToken: false
 status:
   keyPair: {} # See KeyPair duck type below
-  account: ""
-  operator: ""
+  accountRef: 
+    namespace: ""
+    name: ""
   conditions:
     - type: Ready
       status: "True"
     - type: AccountResolved
-      status: "True"
-    - type: OperatorResolved
       status: "True"
     - type: JWTSecretReady
       status: "True"
     - type: SeedSecretReady
       status: "True"
     - type: CredentialsSecretReady
-      status: "True"
-    - type: JWTPushed
       status: "True"
 ```
 
@@ -220,15 +224,23 @@ metadata:
   namespace: nats-io
 spec:
   # One of: Operator, Account, User. May be extended in future to allow for other types.
-  type: "Account" 
+  type: "Account"
   # The secret containing the seed in a file named nats.seed
   seedSecretName: nats-account-sys-0-seed
 status:
   keyPair: {} # See KeyPair duck type below
+  ownerRef:
+    apiVersion: accounts.nats.io/v1alpha1
+    kind: Account
+    name: sys
+    namespace: nats-io
+    uid: ""
   conditions:
     - type: Ready
       status: "True"
     - type: SeedSecretReady
+      status: "True"
+    - type: OwnerResolved
       status: "True"
 ```
 
@@ -237,7 +249,7 @@ status:
 In order to allow User/Account resources be signed by either their parent Operator/Account resource (or by a 
 SigningKey owned by that parent) we must implement duck typing. This allows the controller to not have preexisting 
 knowledge of a specific type ahead of time, and can instead read a resource based on its apiVersion and kind and know 
-it will provide the information required to fulfil it's purpose.
+it will provide the information required to fulfil its purpose.
 
 ### KeyPair
 

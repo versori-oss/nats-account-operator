@@ -27,6 +27,14 @@ package controllers
 
 import (
 	"context"
+	"go.uber.org/multierr"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -48,24 +56,138 @@ type OperatorReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Operator object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
-func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
+	logger := log.FromContext(ctx)
 
-	// TODO(user): your logic here
+	operator := new(accountsnatsiov1alpha1.Operator)
+	if err := r.Get(ctx, req.NamespacedName, operator); err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("operator deleted")
+
+			return ctrl.Result{}, nil
+		}
+
+		logger.Error(err, "failed to Get operator object")
+
+		return ctrl.Result{}, err
+	}
+
+	originalStatus := operator.Status.DeepCopy()
+
+	defer func() {
+		if !equality.Semantic.DeepEqual(originalStatus, operator.Status) {
+			if err2 := r.Status().Update(ctx, operator); err2 != nil {
+				logger.Error(err, "failed to update operator status")
+
+				err = multierr.Append(err, err2)
+			}
+		}
+	}()
+
+	if err := r.ensureSeedSecret(ctx, operator); err != nil {
+		logger.Error(err, "failed to ensure seed secret")
+
+		return ctrl.Result{}, err
+	}
+
+	if err := r.ensureJWTSecret(ctx, operator); err != nil {
+		logger.Error(err, "failed to ensure JWT secret")
+
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
 }
 
+func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *accountsnatsiov1alpha1.Operator) error {
+	//seedSecret := new(v1.Secret)
+	//seedName := types.NamespacedName{
+	//    Name:      operator.Spec.SeedSecretName,
+	//    Namespace: operator.Namespace,
+	//}
+
+	operator.Status.MarkSeedSecretReady("", "")
+
+	return nil
+}
+
+func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *accountsnatsiov1alpha1.Operator) error {
+	operator.Status.MarkJWTSecretReady()
+
+	return nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *OperatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	logger := mgr.GetLogger().WithName("OperatorReconciler")
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&accountsnatsiov1alpha1.Operator{}).
+		Owns(&v1.Secret{}).
+		Watches(
+			&source.Kind{Type: &accountsnatsiov1alpha1.Account{}},
+			handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
+				// whenever an Account is created, updated or deleted, reconcile the Operator for which that account
+				// belongs
+				account, ok := obj.(*accountsnatsiov1alpha1.Account)
+				if !ok {
+					logger.Info("Account watcher received non-Account object",
+						"kind", obj.GetObjectKind().GroupVersionKind().String())
+
+					return nil
+				}
+
+				operatorRef := account.Status.OperatorRef
+
+				if operatorRef == nil {
+					return nil
+				}
+
+				return []reconcile.Request{{
+					NamespacedName: types.NamespacedName{
+						Name:      operatorRef.Name,
+						Namespace: operatorRef.Namespace,
+					},
+				}}
+			}),
+		).
+		Watches(
+			&source.Kind{Type: &accountsnatsiov1alpha1.SigningKey{}},
+			handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
+				// whenever a SigningKey is created, updated or deleted, check whether it's owner is an Operator, and
+				// if so, reconcile it.
+				signingKey, ok := obj.(*accountsnatsiov1alpha1.SigningKey)
+				if !ok {
+					logger.Info("SigningKey watcher received non-SigningKey object",
+						"kind", obj.GetObjectKind().GroupVersionKind().String())
+
+					return nil
+				}
+
+				ownerRef := signingKey.Status.OwnerRef
+				if ownerRef == nil {
+					return nil
+				}
+
+				operatorGVK := (&accountsnatsiov1alpha1.Operator{}).GetObjectKind().GroupVersionKind()
+				if operatorGVK != ownerRef.GetGroupVersionKind() {
+					// TODO: remove this log once we're happy the != is handled correctly
+					logger.V(1).Info("SigningKey watcher received SigningKey with non-operator owner",
+						"owner", ownerRef.GetGroupVersionKind().String())
+
+					return nil
+				}
+
+				return []reconcile.Request{{
+					NamespacedName: types.NamespacedName{
+						Name:      ownerRef.Name,
+						Namespace: ownerRef.Namespace,
+					},
+				}}
+			}),
+		).
 		Complete(r)
 }

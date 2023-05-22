@@ -27,7 +27,6 @@ package controllers
 
 import (
 	"context"
-	v1 "k8s.io/api/core/v1"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -37,26 +36,26 @@ import (
 	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/v1alpha1"
 )
 
-// AccountReconciler reconciles a Account object
-type AccountReconciler struct {
+// SigningKeyReconciler reconciles a SigningKey object
+type SigningKeyReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=accounts.nats.io,resources=accounts,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=accounts.nats.io,resources=accounts/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=accounts.nats.io,resources=accounts/finalizers,verbs=update
+//+kubebuilder:rbac:groups=accounts.nats.io,resources=signingkeys,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=accounts.nats.io,resources=signingkeys/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=accounts.nats.io,resources=signingkeys/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 // TODO(user): Modify the Reconcile function to compare the state specified by
-// the Account object against the actual cluster state, and then
+// the SigningKey object against the actual cluster state, and then
 // perform operations to make the cluster state reflect the state specified by
 // the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
-func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
 
 	// TODO(user): your logic here
@@ -65,14 +64,8 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	err := ctrl.NewControllerManagedBy(mgr).
-		For(&accountsnatsiov1alpha1.Account{}).
-		Owns(&v1.Secret{}).
+func (r *SigningKeyReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&accountsnatsiov1alpha1.SigningKey{}).
 		Complete(r)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }

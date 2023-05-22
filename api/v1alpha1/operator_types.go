@@ -26,25 +26,75 @@ SOFTWARE.
 package v1alpha1
 
 import (
+	"github.com/versori-oss/nats-account-operator/pkg/apis"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // OperatorSpec defines the desired state of Operator
 type OperatorSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// JWTSecretName is the name of the secret containing the self-signed Operator JWT.
+	JWTSecretName string `json:"jwtSecretName"`
 
-	// Foo is an example field of Operator. Edit operator_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// SeedSecretName is the name of the secret containing the seed for this Operator.
+	SeedSecretName string `json:"seedSecretName"`
+
+	// AccountsNamespaceSelector defines which namespaces are allowed to contain Accounts managed by this Operator. By
+	// default, the Operator will manage Accounts in the same namespace as the Operator, it can be set to an empty
+	// selector `{}` to allow all namespaces.
+	AccountsNamespaceSelector *metav1.LabelSelector `json:"accountsNamespaceSelector,omitempty"`
+
+	// AccountsSelector allows the Operator to restrict the Accounts it manages to those matching the selector. The
+	// default (`null`) and `{}` selectors are equivalent and match all Accounts. This is used in combination to the
+	// AccountsNamespaceSelector.
+	AccountsSelector *metav1.LabelSelector `json:"accountsSelector,omitempty"`
+
+	// SigningKeysSelector allows the Operator to restrict the SigningKeys it manages to those matching the selector.
+	// Only SigningKeys in the same namespace as the Operator are considered. The default (`null`) and `{}` selectors
+	// are equivalent and match all SigningKeys.
+	SigningKeysSelector *metav1.LabelSelector `json:"signingKeysSelector,omitempty"`
+
+	// SystemAccountRef is a reference to the Account that this Operator will use as it's system account. It must exist
+	// in the same namespace as the Operator, the AccountsNamespaceSelector and AccountsSelector are ignored.
+	SystemAccountRef v1.LocalObjectReference `json:"systemAccountRef"`
+
+	// Identities is a JWT claim for the Operator
+	Identities []Identity `json:"identities,omitempty"`
+
+	// AccountServerURL is a JWT claim for the Operator
+	AccountServerURL string `json:"accountServerURL,omitempty"`
+
+	// OperatorServiceURLs is a JWT claim for the Operator
+	OperatorServiceURLs []string `json:"operatorServiceURLs,omitempty"`
 }
 
 // OperatorStatus defines the observed state of Operator
 type OperatorStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// KeyPair is the public/private key pair for the Operator. This is created by the controller when an Operator is
+	// created.
+	KeyPair *KeyPair `json:"keyPair,omitempty"`
+
+	// SigningKeys is the list of additional SigningKey resources which are owned by this Operator. Accounts may be
+	// created using the default KeyPair or any of these SigningKeys.
+	SigningKeys []SigningKeyEmbeddedStatus `json:"signingKeys,omitempty"`
+
+	// ResolvedSystemAccount is the Account that this Operator will use as it's system account. This is the same as the
+	// resource defined in OperatorSpec.SystemAccountRef, but validated that the resource exists.
+	ResolvedSystemAccount *InferredObjectReference `json:"resolvedSystemAccount,omitempty"`
+
+	// Conditions the latest available observations of a resource's current state.
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	Conditions apis.Conditions `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+}
+
+func (os *OperatorStatus) GetConditions() apis.Conditions {
+	return os.Conditions
+}
+
+func (os *OperatorStatus) SetConditions(conditions apis.Conditions) {
+	os.Conditions = conditions
 }
 
 //+kubebuilder:object:root=true
