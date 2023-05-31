@@ -5,6 +5,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+type NatsSecretType string
+
+const (
+	NatsSecretTypeSeed NatsSecretType = "seed"
+	NatsSecretTypeJWT  NatsSecretType = "jwt"
+	NatsSecretTypeSKey NatsSecretType = "skey"
+)
+
 // InferredObjectReference is an object reference without the APIVersion and Kind fields. The APIVersion and Kind
 // are inferred based on where the reference is used.
 type InferredObjectReference struct {

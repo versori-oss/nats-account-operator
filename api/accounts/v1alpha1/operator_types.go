@@ -97,6 +97,7 @@ func (os *OperatorStatus) SetConditions(conditions apis.Conditions) {
 	os.Conditions = conditions
 }
 
+//+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 

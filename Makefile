@@ -253,3 +253,7 @@ catalog-build: opm ## Build a catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+.PHONY: code-gen
+code-gen: ## Download code generator
+	bash hack/update-codegen.sh

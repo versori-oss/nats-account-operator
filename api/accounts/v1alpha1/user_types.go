@@ -103,6 +103,7 @@ func (s *UserStatus) SetConditions(conditions apis.Conditions) {
 	s.Conditions = conditions
 }
 
+//+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 

@@ -139,6 +139,7 @@ type OperatorRef struct {
 	Namespace string `json:"namespace"`
 }
 
+//+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 
