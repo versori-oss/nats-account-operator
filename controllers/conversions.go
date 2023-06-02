@@ -59,47 +59,49 @@ func convertToNATSServiceLatency(latency v1alpha1.AccountServiceLatency) *jwt.Se
 func convertToNATSImports(imports []v1alpha1.AccountImport) jwt.Imports {
 	var result jwt.Imports
 	tmp := make([]*jwt.Import, len(imports))
-	for _, i := range imports {
-		tmp = append(tmp, &jwt.Import{
+
+	for n, i := range imports {
+		tmp[n] = &jwt.Import{
 			Name:    i.Name,
 			Subject: jwt.Subject(i.Subject),
 			Account: i.Account,
 			Token:   i.Token,
 			To:      jwt.Subject(i.To),
 			Type:    convertToNATSExportType(i.Type),
-		})
-
-		result.Add(tmp...)
+		}
 	}
+
+	result.Add(tmp...)
 	return result
 }
 
 func convertToNATSExports(exports []v1alpha1.AccountExport) jwt.Exports {
 	var result jwt.Exports
 	tmp := make([]*jwt.Export, len(exports))
-	for _, e := range exports {
-		tmp = append(tmp, &jwt.Export{
-			Name:                 e.Name,
-			Subject:              jwt.Subject(e.Subject),
-			Type:                 convertToNATSExportType(e.Type),
-			TokenReq:             e.TokenReq,
-			ResponseType:         jwt.ResponseType(e.ResponseType),
-			Latency:              convertToNATSServiceLatency(*e.ServiceLatency),
-			AccountTokenPosition: e.AccountTokenPosition,
-		})
 
-		result.Add(tmp...)
+	for n, export := range exports {
+		tmp[n] = &jwt.Export{
+			Name:                 export.Name,
+			Subject:              jwt.Subject(export.Subject),
+			Type:                 convertToNATSExportType(export.Type),
+			TokenReq:             export.TokenReq,
+			ResponseType:         jwt.ResponseType(export.ResponseType),
+			Latency:              convertToNATSServiceLatency(*export.ServiceLatency),
+			AccountTokenPosition: export.AccountTokenPosition,
+		}
 	}
+
+	result.Add(tmp...)
 	return result
 }
 
 func convertToNATSIdentities(idents []v1alpha1.Identity) []jwt.Identity {
 	result := make([]jwt.Identity, len(idents))
-	for _, i := range idents {
-		result = append(result, jwt.Identity{
-			ID:    i.ID,
-			Proof: i.Proof,
-		})
+	for n, ident := range idents {
+		result[n] = jwt.Identity{
+			ID:    ident.ID,
+			Proof: ident.Proof,
+		}
 	}
 	return result
 }

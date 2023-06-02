@@ -29,13 +29,15 @@ spec:
   identities:
     - id: some_string
       proof: some_string
+    - id: other_string
+      proof: other_string
   jwtSecretName: account-test-jwt
   limits:
     conn: 0
     data: 0
     exports: 0
     imports: 0
-    leaf: 0
+    leaf: 0 
     payload: 0
     subs: 0
     wildcards: true
