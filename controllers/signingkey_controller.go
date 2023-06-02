@@ -28,6 +28,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -172,60 +173,50 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *ac
 func (r *SigningKeyReconciler) ensureOwnerResolved(ctx context.Context, signingKey *accountsnatsiov1alpha1.SigningKey) error {
 	logger := log.FromContext(ctx)
 
-	var owner client.Object
-	var err error
-	var accountOwner *accountsnatsiov1alpha1.Account
-	var operatorOwner *accountsnatsiov1alpha1.Operator
+	ownerRef := signingKey.Spec.OwnerRef
 
-	err = r.Client.Get(ctx, types.NamespacedName{
-		Namespace: signingKey.Namespace,
-		Name:      signingKey.Spec.OwnerRef.Name,
-	}, accountOwner)
-	err = r.Client.Get(ctx, types.NamespacedName{
-		Namespace: signingKey.Namespace,
-		Name:      signingKey.Spec.OwnerRef.Name,
-	}, operatorOwner)
-
-	apiversion := "v1alpha1"
-	var kind string
-
-	// Try using the untyped client and unmarshal into owner. This can also remove the need for the switch statement
-	switch signingKey.Spec.OwnerRef.Kind {
-	case "Account":
-		owner, err = r.AccountsClientSet.Accounts(signingKey.Namespace).Get(ctx, signingKey.Spec.OwnerRef.Name, metav1.GetOptions{})
-		if err != nil {
-			logger.Error(err, "failed to fetch account")
-			return err
-		}
-		kind = "Account"
-	case "Operator":
-		owner, err = r.AccountsClientSet.Operators(signingKey.Namespace).Get(ctx, signingKey.Spec.OwnerRef.Name, metav1.GetOptions{})
-		if err != nil {
-			logger.Error(err, "failed to fetch operator")
-			return err
-		}
-		kind = "Operator"
+	ownerRuntimeObj, _ := r.Scheme.New(schema.FromAPIVersionAndKind(ownerRef.APIVersion, ownerRef.Kind))
+	switch ownerRuntimeObj.(type) {
+	case *accountsnatsiov1alpha1.Account, *accountsnatsiov1alpha1.Operator:
+		break
 	default:
-		err := errors.NewBadRequest(fmt.Sprintf("unknown owner kind: %s", signingKey.Spec.OwnerRef.Kind))
+		signingKey.Status.MarkOwnerResolveFailed("UnsupportedOwnerKind", "owner must be one of Account or Operator")
+
+		return nil
+	}
+
+	ownerObj := ownerRuntimeObj.(client.Object)
+
+	if err := r.Client.Get(ctx, types.NamespacedName{
+		Namespace: signingKey.Namespace,
+		Name:      ownerRef.Name,
+	}, ownerObj); err != nil {
+		if errors.IsNotFound(err) {
+			signingKey.Status.MarkOwnerResolveFailed("OwnerNotFound", "")
+
+			return nil
+		}
+
+		logger.Info("failed to fetch signing key owner")
+
 		return err
 	}
 
 	// set the owner reference of this signing key to the owner operator/account
-	err = ctrl.SetControllerReference(owner, signingKey, r.Scheme)
-	if err != nil {
+	if err := ctrl.SetControllerReference(ownerObj, signingKey, r.Scheme); err != nil {
 		logger.Error(err, "failed to set owner reference of signing key")
 		return err
 	}
 
-	// TODO @JoeLanglands: Figure out why the APIVersion and Kind are empty strings in the original owner (SEE ABOVE)
-	ownerRef := accountsnatsiov1alpha1.TypedObjectReference{
-		APIVersion: apiversion,
-		Kind:       kind,
-		Name:       owner.GetName(),
-		Namespace:  owner.GetNamespace(),
-		UID:        owner.GetUID(),
-	}
-	signingKey.Status.MarkOwnerResolved(ownerRef)
+	ownerAPIVersion, ownerKind := ownerObj.GetObjectKind().GroupVersionKind().ToAPIVersionAndKind()
+	signingKey.Status.MarkOwnerResolved(accountsnatsiov1alpha1.TypedObjectReference{
+		APIVersion: ownerAPIVersion,
+		Kind:       ownerKind,
+		Name:       ownerObj.GetName(),
+		Namespace:  ownerObj.GetNamespace(),
+		UID:        ownerObj.GetUID(),
+	})
+
 	return nil
 }
 
