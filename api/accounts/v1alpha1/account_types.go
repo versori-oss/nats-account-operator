@@ -99,7 +99,7 @@ type AccountExport struct {
 	TokenReq             bool                   `json:"tokenReq"`
 	ResponseType         ResponseType           `json:"responseType"`
 	ServiceLatency       *AccountServiceLatency `json:"serviceLatency,omitempty"`
-	AccountTokenPosition int                    `json:"accountTokenPosition"`
+	AccountTokenPosition uint                   `json:"accountTokenPosition"`
 }
 
 type AccountServiceLatency struct {

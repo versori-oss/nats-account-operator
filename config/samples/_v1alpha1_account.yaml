@@ -9,4 +9,64 @@ metadata:
     app.kubernetes.io/created-by: nats-accounts-operator
   name: account-sample
 spec:
-  # TODO(user): Add fields here
+  exports:
+    - accountTokenPosition: 0
+      name: some_string
+      responseType: some_string
+      serviceLatency:
+        results: some_string
+        sampling: 1
+      subject: some_subject
+      tokenReq: true
+      type: some_string
+  imports:
+    - account: some_string
+      name: some_string
+      subject: some_string
+      to: some_string
+      token: some_string
+      type: some_string
+  identities:
+    - id: some_string
+      proof: some_string
+  jwtSecretName: account-test-jwt
+  limits:
+    conn: 0
+    data: 0
+    exports: 0
+    imports: 0
+    leaf: 0
+    payload: 0
+    subs: 0
+    wildcards: true
+  seedSecretName: account-test-seed
+  signingKey:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: SigningKey
+      name: signingkey-operator-test
+      namespace: nats-accounts-operator-system
+  signingKeysSelector:
+    matchExpressions:
+      - key: some_string
+        operator: some_string
+        values:
+          - some_string
+    matchLabels:
+      some_string: some_string
+  usersNamespaceSelector:
+    matchExpressions:
+      - key: some_string
+        operator: some_string
+        values:
+          - some_string
+    matchLabels:
+      some_string: some_string
+  usersSelector:
+    matchExpressions:
+      - key: some_string
+        operator: some_string
+        values:
+          - some_string
+    matchLabels:
+      some_string: some_string

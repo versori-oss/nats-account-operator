@@ -27,11 +27,14 @@ package controllers
 
 import (
 	"context"
-	"go.uber.org/multierr"
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
@@ -41,13 +44,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/v1alpha1"
+	"github.com/nats-io/jwt"
+	"github.com/nats-io/nkeys"
+	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 )
 
 // OperatorReconciler reconciles a Operator object
 type OperatorReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme            *runtime.Scheme
+	CV1Interface      corev1.CoreV1Interface
+	AccountsClientSet accountsclientsets.AccountsV1alpha1Interface
 }
 
 //+kubebuilder:rbac:groups=accounts.nats.io,resources=operators,verbs=get;list;watch;create;update;patch;delete
@@ -66,7 +74,6 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 	if err := r.Get(ctx, req.NamespacedName, operator); err != nil {
 		if errors.IsNotFound(err) {
 			logger.V(1).Info("operator deleted")
-
 			return ctrl.Result{}, nil
 		}
 
@@ -78,17 +85,30 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 	originalStatus := operator.Status.DeepCopy()
 
 	defer func() {
+		if err != nil {
+			return
+		}
 		if !equality.Semantic.DeepEqual(originalStatus, operator.Status) {
-			if err2 := r.Status().Update(ctx, operator); err2 != nil {
+			// logger.Info("updating operator status", "status", operator.Status, "originalStatus", originalStatus)
+			if err = r.Status().Update(ctx, operator); err != nil {
+				if errors.IsConflict(err) {
+					result.RequeueAfter = time.Second * 5
+					return
+				}
 				logger.Error(err, "failed to update operator status")
 
-				err = multierr.Append(err, err2)
 			}
 		}
 	}()
 
 	if err := r.ensureSeedSecret(ctx, operator); err != nil {
 		logger.Error(err, "failed to ensure seed secret")
+
+		return ctrl.Result{}, err
+	}
+
+	if err := r.ensureSigningKeys(ctx, operator); err != nil {
+		logger.Error(err, "failed to ensure signing keys")
 
 		return ctrl.Result{}, err
 	}
@@ -103,19 +123,149 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 }
 
 func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *accountsnatsiov1alpha1.Operator) error {
-	//seedSecret := new(v1.Secret)
-	//seedName := types.NamespacedName{
-	//    Name:      operator.Spec.SeedSecretName,
-	//    Namespace: operator.Namespace,
-	//}
+	logger := log.FromContext(ctx)
 
-	operator.Status.MarkSeedSecretReady("", "")
+	// check if secret with operator seed exists
+	var publicKey string
+	secret, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.SeedSecretName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		keyPair, err := nkeys.CreateOperator()
+		if err != nil {
+			logger.Error(err, "failed to create operator key pair")
+			return err
+		}
+		seed, err := keyPair.Seed()
+		if err != nil {
+			logger.Error(err, "failed to get operator seed")
+			return err
+		}
+		publicKey, err = keyPair.PublicKey()
+		if err != nil {
+			logger.Error(err, "failed to get operator public key")
+			return err
+		}
+
+		labels := map[string]string{
+			"operator-name": operator.Name,
+			"secret-type":   string(accountsnatsiov1alpha1.NatsSecretTypeSeed),
+		}
+
+		data := map[string][]byte{
+			"seed":      seed,
+			"publicKey": []byte(publicKey),
+		}
+
+		seedSecret := NewSecret(operator.Spec.SeedSecretName, operator.Namespace, WithData(data), WithImmutable(true), WithLabels(labels))
+
+		err = ctrl.SetControllerReference(operator, &seedSecret, r.Scheme)
+		if err != nil {
+			logger.Error(err, "failed to set controller reference")
+			return err
+		}
+
+		secret, err = r.CV1Interface.Secrets(operator.Namespace).Create(ctx, &seedSecret, metav1.CreateOptions{})
+		if err != nil {
+			logger.Error(err, "failed to create seed secret")
+			return err
+		}
+	} else if err != nil {
+		logger.Error(err, "failed to get seed secret")
+		return err
+	} else {
+		publicKey = string(secret.Data["publicKey"])
+	}
+
+	operator.Status.MarkSeedSecretReady(publicKey, secret.Name)
 
 	return nil
 }
 
 func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *accountsnatsiov1alpha1.Operator) error {
+	logger := log.FromContext(ctx)
+
+	seedSecret, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.SeedSecretName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		logger.V(1).Info("seed secret not found, skipping jwt secret creation")
+		return nil
+	}
+
+	operatorPublicKey := string(seedSecret.Data["publicKey"])
+
+	_, err = r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		opClaims := jwt.NewOperatorClaims(operator.Status.KeyPair.PublicKey)
+		opClaims.Name = operator.Name
+		opClaims.Issuer = operatorPublicKey
+		opClaims.IssuedAt = time.Now().Unix()
+		opClaims.Type = jwt.OperatorClaim
+		keys, err := nkeys.FromSeed(seedSecret.Data["seed"])
+		if err != nil {
+			logger.Error(err, "failed to get nkeys from seed")
+			return err
+		}
+		jwt, err := opClaims.Encode(keys)
+		if err != nil {
+			logger.Error(err, "failed to encode operator claims")
+			return err
+		}
+
+		data := map[string][]byte{
+			"jwt": []byte(jwt),
+		}
+
+		labels := map[string]string{
+			"operator-name": operator.Name,
+		}
+
+		jwtSecret := NewSecret(operator.Spec.JWTSecretName, operator.Namespace, WithData(data), WithLabels(labels), WithImmutable(true))
+
+		err = ctrl.SetControllerReference(operator, &jwtSecret, r.Scheme)
+		if err != nil {
+			logger.Error(err, "failed to set controller reference")
+			return err
+		}
+
+		_, err = r.CV1Interface.Secrets(operator.Namespace).Create(ctx, &jwtSecret, metav1.CreateOptions{})
+		if err != nil {
+			logger.Error(err, "failed to create jwt secret")
+			return err
+		}
+	} else if err != nil {
+		logger.Error(err, "failed to get jwt secret")
+		operator.Status.MarkJWTSecretFailed("Could not find JWT secret", "failed to get jwt secret: %s", err.Error())
+		return err
+	}
+
 	operator.Status.MarkJWTSecretReady()
+
+	return nil
+}
+
+func (r *OperatorReconciler) ensureSigningKeys(ctx context.Context, operator *accountsnatsiov1alpha1.Operator) error {
+	logger := log.FromContext(ctx)
+
+	sKeys, err := r.AccountsClientSet.SigningKeys(operator.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		logger.Error(err, "failed to list signing keys")
+		return err
+	}
+
+	// Need to filter by owner so that the ones iterated through are owned by operator
+
+	var operatorSKeys []accountsnatsiov1alpha1.SigningKeyEmbeddedStatus
+
+	for _, key := range sKeys.Items {
+		// Dirty way because I'd like to use field selectors but they don't work so I may need to add labels later
+		if key.Status.OwnerRef.Name == operator.Name {
+			sKeyEmbedded := accountsnatsiov1alpha1.SigningKeyEmbeddedStatus{
+				Name:    key.GetName(),
+				KeyPair: *key.Status.KeyPair,
+			}
+			operatorSKeys = append(operatorSKeys, sKeyEmbedded)
+		}
+	}
+
+	operator.Status.MarkSigningKeysUpdated(operatorSKeys)
 
 	return nil
 }

@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/v1alpha1"
+	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 
 // UserReconciler reconciles a User object

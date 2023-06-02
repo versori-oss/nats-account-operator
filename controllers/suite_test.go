@@ -39,7 +39,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/v1alpha1"
+	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 

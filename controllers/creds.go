@@ -1,9 +1,10 @@
 package controllers
 
 import (
+	"time"
+
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
-	"time"
 )
 
 type ClaimOption func(cd *jwt.ClaimsData) error
@@ -15,20 +16,20 @@ func ExpiresAt(t time.Time) ClaimOption {
 	}
 }
 
-func CreateUser(name string, payload jwt.User, signingKey nkeys.KeyPair, opts ...ClaimOption) (ujwt string, seed []byte, err error) {
+func CreateUser(name string, payload jwt.User, signingKey nkeys.KeyPair, opts ...ClaimOption) (ujwt string, pubKey string, seed []byte, err error) {
 	kp, err := nkeys.CreateUser()
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
 	seed, err = kp.Seed()
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
-	pubKey, err := kp.PublicKey()
+	pubKey, err = kp.PublicKey()
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
 	claims := jwt.NewUserClaims(pubKey)
@@ -38,37 +39,37 @@ func CreateUser(name string, payload jwt.User, signingKey nkeys.KeyPair, opts ..
 
 	claims.IssuerAccount, err = signingKey.PublicKey()
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
 	for _, fn := range opts {
 		if err = fn(&claims.ClaimsData); err != nil {
-			return "", nil, err
+			return "", "", nil, err
 		}
 	}
 
 	ujwt, err = claims.Encode(signingKey)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
-	return ujwt, seed, nil
+	return ujwt, pubKey, seed, nil
 }
 
-func CreateAccount(name string, payload jwt.Account, signingKey nkeys.KeyPair, opts ...ClaimOption) (ajwt string, seed []byte, err error) {
+func CreateAccount(name string, payload jwt.Account, signingKey nkeys.KeyPair, opts ...ClaimOption) (ajwt string, pubKey string, seed []byte, err error) {
 	kp, err := nkeys.CreateAccount()
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
 	seed, err = kp.Seed()
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
-	pubKey, err := kp.PublicKey()
+	pubKey, err = kp.PublicKey()
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
 	claims := jwt.NewAccountClaims(pubKey)
@@ -77,16 +78,16 @@ func CreateAccount(name string, payload jwt.Account, signingKey nkeys.KeyPair, o
 
 	for _, fn := range opts {
 		if err = fn(&claims.ClaimsData); err != nil {
-			return "", nil, err
+			return "", "", nil, err
 		}
 	}
 
 	ajwt, err = claims.Encode(signingKey)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
-	return ajwt, seed, nil
+	return ajwt, pubKey, seed, nil
 }
 
 func UpdateAccount(existing jwt.AccountClaims, signingKey nkeys.KeyPair, opts ...ClaimOption) (ajwt string, err error) {

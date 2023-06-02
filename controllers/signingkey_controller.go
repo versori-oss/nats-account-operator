@@ -27,19 +27,30 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
+	"go.uber.org/multierr"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/v1alpha1"
+	"github.com/nats-io/nkeys"
+	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 )
 
 // SigningKeyReconciler reconciles a SigningKey object
 type SigningKeyReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme            *runtime.Scheme
+	CV1Interface      corev1.CoreV1Interface
+	AccountsClientSet accountsclientsets.AccountsV1alpha1Interface
 }
 
 //+kubebuilder:rbac:groups=accounts.nats.io,resources=signingkeys,verbs=get;list;watch;create;update;patch;delete
@@ -55,12 +66,167 @@ type SigningKeyReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
-func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
+	logger := log.FromContext(ctx)
 
-	// TODO(user): your logic here
+	signingKey := new(accountsnatsiov1alpha1.SigningKey)
+	if err := r.Get(ctx, req.NamespacedName, signingKey); err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("signing key not found")
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "failed to fetch signing key")
+		return ctrl.Result{}, err
+	}
 
+	originalStatus := signingKey.Status.DeepCopy()
+	defer func() {
+		if !equality.Semantic.DeepEqual(originalStatus, signingKey.Status) {
+			if err2 := r.Status().Update(ctx, signingKey); err2 != nil {
+				logger.Error(err2, "failed to update signing key status")
+				err = multierr.Append(err, err2)
+			}
+		}
+	}()
+
+	if err := r.ensureOwnerResolved(ctx, signingKey); err != nil {
+		logger.Error(err, "failed to ensure owner resolved")
+		signingKey.Status.MarkOwnerResolveFailed("failed to resolve owner", "%s:%s", signingKey.Spec.OwnerRef.Name, signingKey.Spec.OwnerRef.Kind)
+		return ctrl.Result{}, err
+	}
+
+	if err := r.ensureKeyPair(ctx, signingKey); err != nil {
+		logger.Error(err, "failed to ensure key pair")
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
+}
+
+func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *accountsnatsiov1alpha1.SigningKey) error {
+	logger := log.FromContext(ctx)
+
+	var publicKey string
+	secret, err := r.CV1Interface.Secrets(signingKey.Namespace).Get(ctx, signingKey.Spec.SeedSecretName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		var keyPair nkeys.KeyPair
+		switch signingKey.Spec.OwnerRef.Kind {
+		case "Account":
+			keyPair, err = nkeys.CreateAccount()
+		case "Operator":
+			keyPair, err = nkeys.CreateOperator()
+		default:
+			err := errors.NewBadRequest(fmt.Sprintf("unknown owner kind: %s", signingKey.Spec.OwnerRef.Kind))
+			return err
+		}
+		if err != nil {
+			logger.Error(err, "failed to create key pair")
+			return err
+		}
+
+		seed, err := keyPair.Seed()
+		if err != nil {
+			logger.Error(err, "failed to get seed")
+			return err
+		}
+		publicKey, err = keyPair.PublicKey()
+		if err != nil {
+			logger.Error(err, "failed to get public key")
+			return err
+		}
+
+		data := map[string][]byte{
+			"seed":      seed,
+			"publicKey": []byte(publicKey),
+		}
+
+		labels := map[string]string{
+			"operator-name": signingKey.Spec.OwnerRef.Name,
+			"secret-type":   string(accountsnatsiov1alpha1.NatsSecretTypeSKey),
+		}
+
+		secret := NewSecret(signingKey.Spec.SeedSecretName, signingKey.Namespace, WithImmutable(true), WithLabels(labels), WithData(data))
+
+		err = ctrl.SetControllerReference(signingKey, &secret, r.Scheme)
+		if err != nil {
+			logger.Error(err, "failed to set controller reference")
+			return err
+		}
+
+		_, err = r.CV1Interface.Secrets(signingKey.Namespace).Create(ctx, &secret, metav1.CreateOptions{})
+		if err != nil {
+			logger.Error(err, "failed to create seed secret")
+			return err
+		}
+	} else if err != nil {
+		logger.Error(err, "failed to fetch seed secret")
+		return err
+	} else {
+		publicKey = string(secret.Data["publicKey"])
+	}
+
+	signingKey.Status.MarkSeedSecretReady(publicKey, signingKey.Spec.SeedSecretName)
+
+	return nil
+}
+
+func (r *SigningKeyReconciler) ensureOwnerResolved(ctx context.Context, signingKey *accountsnatsiov1alpha1.SigningKey) error {
+	logger := log.FromContext(ctx)
+
+	var owner client.Object
+	var err error
+	var accountOwner *accountsnatsiov1alpha1.Account
+	var operatorOwner *accountsnatsiov1alpha1.Operator
+
+	err = r.Client.Get(ctx, types.NamespacedName{
+		Namespace: signingKey.Namespace,
+		Name:      signingKey.Spec.OwnerRef.Name,
+	}, accountOwner)
+	err = r.Client.Get(ctx, types.NamespacedName{
+		Namespace: signingKey.Namespace,
+		Name:      signingKey.Spec.OwnerRef.Name,
+	}, operatorOwner)
+
+	apiversion := "v1alpha1"
+	var kind string
+
+	// Try using the untyped client and unmarshal into owner. This can also remove the need for the switch statement
+	switch signingKey.Spec.OwnerRef.Kind {
+	case "Account":
+		owner, err = r.AccountsClientSet.Accounts(signingKey.Namespace).Get(ctx, signingKey.Spec.OwnerRef.Name, metav1.GetOptions{})
+		if err != nil {
+			logger.Error(err, "failed to fetch account")
+			return err
+		}
+		kind = "Account"
+	case "Operator":
+		owner, err = r.AccountsClientSet.Operators(signingKey.Namespace).Get(ctx, signingKey.Spec.OwnerRef.Name, metav1.GetOptions{})
+		if err != nil {
+			logger.Error(err, "failed to fetch operator")
+			return err
+		}
+		kind = "Operator"
+	default:
+		err := errors.NewBadRequest(fmt.Sprintf("unknown owner kind: %s", signingKey.Spec.OwnerRef.Kind))
+		return err
+	}
+
+	// set the owner reference of this signing key to the owner operator/account
+	err = ctrl.SetControllerReference(owner, signingKey, r.Scheme)
+	if err != nil {
+		logger.Error(err, "failed to set owner reference of signing key")
+		return err
+	}
+
+	// TODO @JoeLanglands: Figure out why the APIVersion and Kind are empty strings in the original owner (SEE ABOVE)
+	ownerRef := accountsnatsiov1alpha1.TypedObjectReference{
+		APIVersion: apiversion,
+		Kind:       kind,
+		Name:       owner.GetName(),
+		Namespace:  owner.GetNamespace(),
+		UID:        owner.GetUID(),
+	}
+	signingKey.Status.MarkOwnerResolved(ownerRef)
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -7,6 +7,11 @@ metadata:
     app.kubernetes.io/part-of: nats-accounts-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/created-by: nats-accounts-operator
-  name: signingkey-sample
+  name: signingkey-operator-test-redundant
 spec:
-  # TODO(user): Add fields here
+  ownerRef:
+    apiVersion: accounts.nats.io/v1alpha1
+    kind: Operator
+    name: operator-test
+  seedSecretName: signingkey-sample-seed-redundant
+  type: Operator
