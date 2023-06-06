@@ -232,14 +232,6 @@ func (r *OperatorReconciler) ensureJWTSecretAndPushed(ctx context.Context, opera
 			return err
 		}
 
-		// now push the jwt to the NATS server
-		err = r.NatsClient.PushAccountJWT(ctx, jwt)
-		if err != nil {
-			logger.Error(err, "failed to push jwt to nats server")
-			operator.Status.MarkJWTPushFailed("failed to push jwt to nats server", "error: %s", err.Error())
-			return err
-		}
-
 	} else if err != nil {
 		logger.Error(err, "failed to get jwt secret")
 		operator.Status.MarkJWTSecretFailed("Could not find JWT secret", "failed to get jwt secret: %s", err.Error())
@@ -247,7 +239,6 @@ func (r *OperatorReconciler) ensureJWTSecretAndPushed(ctx context.Context, opera
 	}
 
 	operator.Status.MarkJWTSecretReady()
-	operator.Status.MarkJWTPushed()
 	return nil
 }
 

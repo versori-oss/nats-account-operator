@@ -9,7 +9,6 @@ const (
 	OperatorConditionSigningKeysUpdated    = "SigningKeysUpdated"
 	OperatorConditionJWTSecretReady        = "JWTSecretReady"
 	OperatorConditionSeedSecretReady       = "SeedSecretReady"
-	OperatorConditionJWTPushed             = "JWTPushed"
 )
 
 var operatorConditionSet = apis.NewLivingConditionSet(
@@ -19,7 +18,6 @@ var operatorConditionSet = apis.NewLivingConditionSet(
 	OperatorConditionSigningKeysUpdated,
 	OperatorConditionJWTSecretReady,
 	OperatorConditionSeedSecretReady,
-	OperatorConditionJWTPushed,
 )
 
 func (*Operator) GetConditionSet() apis.ConditionSet {
@@ -124,16 +122,4 @@ func (os *OperatorStatus) MarkSeedSecretUnknown(reason, messageFormat string, me
 	os.KeyPair = nil
 
 	operatorConditionSet.Manage(os).MarkUnknown(OperatorConditionSeedSecretReady, reason, messageFormat, messageA...)
-}
-
-func (os *OperatorStatus) MarkJWTPushed() {
-	operatorConditionSet.Manage(os).MarkTrue(OperatorConditionJWTPushed)
-}
-
-func (os *OperatorStatus) MarkJWTPushFailed(reason, messageFormat string, messageA ...interface{}) {
-	operatorConditionSet.Manage(os).MarkFalse(OperatorConditionJWTPushed, reason, messageFormat, messageA...)
-}
-
-func (os *OperatorStatus) MarkJWTPushUnknown(reason, messageFormat string, messageA ...interface{}) {
-	operatorConditionSet.Manage(os).MarkUnknown(OperatorConditionJWTPushed, reason, messageFormat, messageA...)
 }
