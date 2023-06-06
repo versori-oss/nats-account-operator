@@ -148,8 +148,7 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *ac
 
 		secret := NewSecret(signingKey.Spec.SeedSecretName, signingKey.Namespace, WithImmutable(true), WithLabels(labels), WithData(data))
 
-		err = ctrl.SetControllerReference(signingKey, &secret, r.Scheme)
-		if err != nil {
+		if err = ctrl.SetControllerReference(signingKey, &secret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set controller reference")
 			return err
 		}

@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"time"
+
 	"github.com/nats-io/jwt"
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
@@ -104,4 +106,21 @@ func convertToNATSIdentities(idents []v1alpha1.Identity) []jwt.Identity {
 		}
 	}
 	return result
+}
+
+func convertToNATSUserPermissions(permissions v1alpha1.UserPermissions) jwt.Permissions {
+	return jwt.Permissions{
+		Pub: jwt.Permission{
+			Allow: permissions.Pub.Allow,
+			Deny:  permissions.Pub.Deny,
+		},
+		Sub: jwt.Permission{
+			Allow: permissions.Sub.Allow,
+			Deny:  permissions.Sub.Deny,
+		},
+		Resp: &jwt.ResponsePermission{
+			MaxMsgs: permissions.Resp.Max,
+			Expires: time.Duration(permissions.Resp.TTL) * time.Second,
+		},
+	}
 }

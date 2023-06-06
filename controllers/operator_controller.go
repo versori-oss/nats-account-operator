@@ -56,6 +56,7 @@ type OperatorReconciler struct {
 	Scheme            *runtime.Scheme
 	CV1Interface      corev1.CoreV1Interface
 	AccountsClientSet accountsclientsets.AccountsV1alpha1Interface
+	NatsClient        *NatsClient
 }
 
 //+kubebuilder:rbac:groups=accounts.nats.io,resources=operators,verbs=get;list;watch;create;update;patch;delete
@@ -113,7 +114,7 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureJWTSecret(ctx, operator); err != nil {
+	if err := r.ensureJWTSecretAndPushed(ctx, operator); err != nil {
 		logger.Error(err, "failed to ensure JWT secret")
 
 		return ctrl.Result{}, err
@@ -180,7 +181,7 @@ func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *acc
 	return nil
 }
 
-func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *accountsnatsiov1alpha1.Operator) error {
+func (r *OperatorReconciler) ensureJWTSecretAndPushed(ctx context.Context, operator *accountsnatsiov1alpha1.Operator) error {
 	logger := log.FromContext(ctx)
 
 	seedSecret, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.SeedSecretName, metav1.GetOptions{})
@@ -230,6 +231,15 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 			logger.Error(err, "failed to create jwt secret")
 			return err
 		}
+
+		// now push the jwt to the NATS server
+		err = r.NatsClient.PushAccountJWT(ctx, jwt)
+		if err != nil {
+			logger.Error(err, "failed to push jwt to nats server")
+			operator.Status.MarkJWTPushFailed("failed to push jwt to nats server", "error: %s", err.Error())
+			return err
+		}
+
 	} else if err != nil {
 		logger.Error(err, "failed to get jwt secret")
 		operator.Status.MarkJWTSecretFailed("Could not find JWT secret", "failed to get jwt secret: %s", err.Error())
@@ -237,7 +247,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 	}
 
 	operator.Status.MarkJWTSecretReady()
-
+	operator.Status.MarkJWTPushed()
 	return nil
 }
 

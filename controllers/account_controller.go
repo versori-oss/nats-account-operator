@@ -53,6 +53,7 @@ type AccountReconciler struct {
 	Scheme            *runtime.Scheme
 	CV1Interface      corev1.CoreV1Interface
 	AccountsClientSet accountsclientsets.AccountsV1alpha1Interface
+	NatsClient        *NatsClient
 }
 
 //+kubebuilder:rbac:groups=accounts.nats.io,resources=accounts,verbs=get;list;watch;create;update;patch;delete
@@ -115,9 +116,11 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 }
 
 func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *accountsnatsiov1alpha1.Account) error {
-	_ = log.FromContext(ctx)
+	// logger = log.FromContext(ctx)
 
-	// TODO @JoeLanglands implement me properly!
+	// ownerRef := acc.Spec.SigningKey.Ref
+
+	// TODO implement me properly!!
 
 	opRef := accountsnatsiov1alpha1.InferredObjectReference{
 		Name:      "operator-test",
@@ -179,20 +182,38 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 
 		// now create the secrets for the jwt and seed TODO @JoeLanglands add labels and annotations
 		jwtSecret := NewSecret(acc.Spec.JWTSecretName, acc.Namespace, WithData(map[string][]byte{"jwt": []byte(ajwt)}), WithImmutable(true))
+		if err := ctrl.SetControllerReference(acc, &jwtSecret, r.Scheme); err != nil {
+			logger.Error(err, "failed to set account as owner of jwt secret")
+			return err
+		}
 		if _, err = r.CV1Interface.Secrets(acc.Namespace).Create(ctx, &jwtSecret, metav1.CreateOptions{}); err != nil {
 			logger.Error(err, "failed to create jwt secret")
 			return err
 		}
 
 		seedSecret := NewSecret(acc.Spec.SeedSecretName, acc.Namespace, WithData(map[string][]byte{"seed": seed}), WithImmutable(true))
+		if err := ctrl.SetControllerReference(acc, &seedSecret, r.Scheme); err != nil {
+			logger.Error(err, "failed to set account as owner of seed secret")
+			return err
+		}
 		if _, err = r.CV1Interface.Secrets(acc.Namespace).Create(ctx, &seedSecret, metav1.CreateOptions{}); err != nil {
 			logger.Error(err, "failed to create seed secret")
 			return err
 		}
+		_, _ = r.NatsClient.GetAccountJWT(ctx, publicKey)
 
+		err = r.NatsClient.PushAccountJWT(ctx, ajwt)
+		if err != nil {
+			logger.Info("failed to push account jwt to nats server", "error", err)
+			acc.Status.MarkJWTPushFailed("failed to push account jwt to nats server", "error: %s", err)
+			return nil
+		}
+
+		acc.Status.MarkJWTPushed()
 		acc.Status.MarkJWTSecretReady()
 		acc.Status.MarkSeedSecretReady(publicKey, seedSecret.Name)
 	} else if errSeed != nil || errJWT != nil {
+		// TODO @JoeLanglands change this shit
 		err := multierr.Append(errSeed, errJWT)
 		logger.Error(err, "failed to get seed or jwt secret")
 	}
