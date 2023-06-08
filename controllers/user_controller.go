@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"go.uber.org/multierr"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -203,5 +204,6 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 func (r *UserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&accountsnatsiov1alpha1.User{}).
+		Owns(&v1.Secret{}).
 		Complete(r)
 }

@@ -37,9 +37,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
@@ -90,7 +94,6 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 			return
 		}
 		if !equality.Semantic.DeepEqual(originalStatus, acc.Status) {
-			// logger.Info("updating acc status", "status", acc.Status, "originalStatus", originalStatus)
 			if err = r.Status().Update(ctx, acc); err != nil {
 				if errors.IsConflict(err) {
 					result.RequeueAfter = time.Second * 5
@@ -102,12 +105,18 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 		}
 	}()
 
+	sKeys, err := r.ensureSigningKeysUpdated(ctx, acc)
+	if err != nil {
+		logger.Error(err, "failed to ensure signing keys were updated")
+		return ctrl.Result{}, err
+	}
+
 	if err := r.ensureOperatorResolved(ctx, acc); err != nil {
 		logger.Error(err, "failed to ensure the operator owning the account was resolved")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureSeedJWTSecrets(ctx, acc); err != nil {
+	if err := r.ensureSeedJWTSecrets(ctx, acc, sKeys); err != nil {
 		logger.Error(err, "failed to ensure account jwt secret")
 		return ctrl.Result{}, err
 	}
@@ -115,12 +124,48 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	return ctrl.Result{}, nil
 }
 
+func (r *AccountReconciler) ensureSigningKeysUpdated(ctx context.Context, acc *accountsnatsiov1alpha1.Account) ([]accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, error) {
+	logger := log.FromContext(ctx)
+
+	skList, err := r.AccountsClientSet.SigningKeys(acc.Namespace).List(ctx, metav1.ListOptions{})
+	if errors.IsNotFound(err) {
+		logger.Info("no signing keys found")
+		acc.Status.MarkSigningKeysUpdateUnknown("no signing keys found", "")
+		return nil, nil
+	} else if err != nil {
+		logger.Error(err, "failed to list signing keys")
+		return nil, err
+	}
+
+	signingKeys := make([]accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, 0)
+	for _, sk := range skList.Items {
+		if sk.Status.OwnerRef.Namespace == acc.Namespace && sk.Status.OwnerRef.Name == acc.Name {
+			signingKeys = append(signingKeys, accountsnatsiov1alpha1.SigningKeyEmbeddedStatus{
+				Name: sk.Name,
+				KeyPair: accountsnatsiov1alpha1.KeyPair{
+					PublicKey:      sk.Status.KeyPair.PublicKey,
+					SeedSecretName: sk.Status.KeyPair.SeedSecretName,
+				},
+			})
+		}
+	}
+
+	if len(signingKeys) == 0 {
+		logger.Info("no signing keys found for account")
+		acc.Status.MarkSigningKeysUpdateUnknown("no signing keys found for account", "account: %s", acc.Name)
+		return nil, nil
+	}
+
+	acc.Status.MarkSigningKeysUpdated(signingKeys)
+	return signingKeys, nil
+}
+
 func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *accountsnatsiov1alpha1.Account) error {
 	// logger = log.FromContext(ctx)
 
-	// ownerRef := acc.Spec.SigningKey.Ref
+	// operators, err := r.AccountsClientSet.Operators(acc.Namespace).List(ctx, metav1.ListOptions{})
 
-	// TODO implement me properly!!
+	// WTF AM I DOING HERE?
 
 	opRef := accountsnatsiov1alpha1.InferredObjectReference{
 		Name:      "operator-test",
@@ -131,19 +176,26 @@ func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *acc
 	return nil
 }
 
-func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accountsnatsiov1alpha1.Account) error {
+func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accountsnatsiov1alpha1.Account, sKeys []accountsnatsiov1alpha1.SigningKeyEmbeddedStatus) error {
 	logger := log.FromContext(ctx)
 
 	_, errSeed := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, acc.Spec.SeedSecretName, metav1.GetOptions{})
 	_, errJWT := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, acc.Spec.JWTSecretName, metav1.GetOptions{})
+
+	var sKeysPublicKeys []string
+	for _, sk := range sKeys {
+		sKeysPublicKeys = append(sKeysPublicKeys, sk.KeyPair.PublicKey)
+	}
 
 	// if one or the other does not exist, then create them both
 	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) {
 		// find the signing key from the spec and verify it belongs to an operator.
 		sKey, err := r.AccountsClientSet.SigningKeys(acc.Namespace).Get(ctx, acc.Spec.SigningKey.Ref.Name, metav1.GetOptions{})
 		if err != nil {
-			logger.Error(err, "failed to get signing key")
-			return err
+			logger.Info("failed to get signing key", "signing key", acc.Spec.SigningKey.Ref.Name)
+			acc.Status.MarkJWTPushFailed("failed to get signing key", "spec signing key: %s", acc.Spec.SigningKey.Ref.Name)
+			acc.Status.MarkSeedSecretFailed("failed to get signing key", "spec signing key: %s", acc.Spec.SigningKey.Ref.Name)
+			return nil
 		}
 		if sKey.Status.OwnerRef.Kind != "Operator" {
 			logger.Info("signing key is not owned by an operator")
@@ -153,13 +205,12 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 		// TODO @JoeLanglands: ensure that this account can be managed by the operator that owns the signing key.
 		// this involves following the namespace and label selector restrictions.
 
-		// unpack the account claims from the spec
 		accClaims := jwt.Account{
-			Imports:    convertToNATSImports(acc.Spec.Imports),
-			Exports:    convertToNATSExports(acc.Spec.Exports),
-			Identities: convertToNATSIdentities(acc.Spec.Identities),
-			Limits:     convertToNATSOperatorLimits(acc.Spec.Limits),
-			// SigningKeys: []string{},  // TODO @JoeLanglands: add signing keys if they are needed, also what are they? I think they are the publicKeys of any signing keys belonging to the account.
+			Imports:     convertToNATSImports(acc.Spec.Imports),
+			Exports:     convertToNATSExports(acc.Spec.Exports),
+			Identities:  convertToNATSIdentities(acc.Spec.Identities),
+			Limits:      convertToNATSOperatorLimits(acc.Spec.Limits),
+			SigningKeys: sKeysPublicKeys,
 		}
 
 		skSeedSecret, err := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, sKey.Status.KeyPair.SeedSecretName, metav1.GetOptions{})
@@ -200,7 +251,6 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			logger.Error(err, "failed to create seed secret")
 			return err
 		}
-		_, _ = r.NatsClient.GetAccountJWT(ctx, publicKey)
 
 		err = r.NatsClient.PushAccountJWT(ctx, ajwt)
 		if err != nil {
@@ -223,10 +273,42 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	logger := mgr.GetLogger().WithName("AccountReconciler")
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&accountsnatsiov1alpha1.Account{}).
 		Owns(&v1.Secret{}).
+		Watches(
+			&source.Kind{Type: &accountsnatsiov1alpha1.SigningKey{}},
+			handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
+				signingKey, ok := obj.(*accountsnatsiov1alpha1.SigningKey)
+				if !ok {
+					logger.Info("SigningKey watcher received non-SigningKey object",
+						"kind", obj.GetObjectKind().GroupVersionKind().String())
+					return nil
+				}
+
+				ownerRef := signingKey.Status.OwnerRef
+				if ownerRef == nil {
+					return nil
+				}
+
+				accountGVK := (&accountsnatsiov1alpha1.Account{}).GetObjectKind().GroupVersionKind()
+				if accountGVK != ownerRef.GetGroupVersionKind() {
+					logger.V(1).Info("SigningKey watcher received SigningKey with non-account owner",
+						"owner", ownerRef.GetGroupVersionKind().String())
+					return nil
+				}
+
+				return []reconcile.Request{{
+					NamespacedName: types.NamespacedName{
+						Name:      ownerRef.Name,
+						Namespace: ownerRef.Namespace,
+					},
+				}}
+			}),
+		).
 		Complete(r)
+
 	if err != nil {
 		return err
 	}

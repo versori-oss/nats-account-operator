@@ -29,6 +29,7 @@ import (
 	"context"
 	"fmt"
 
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"go.uber.org/multierr"
@@ -224,5 +225,6 @@ func (r *SigningKeyReconciler) ensureOwnerResolved(ctx context.Context, signingK
 func (r *SigningKeyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&accountsnatsiov1alpha1.SigningKey{}).
+		Owns(&v1.Secret{}).
 		Complete(r)
 }
