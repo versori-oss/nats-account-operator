@@ -57,6 +57,15 @@ func (n *NatsClient) GetAccountJWT(ctx context.Context, accountID string) (strin
 	return string(msg.Data), nil
 }
 
+func (n *NatsClient) UpdateAccountJWT(ctx context.Context, accountID, ajwt string) error {
+	subject := fmt.Sprintf("$SYS.REQ.ACCOUNT.%s.CLAIMS.UPDATE", accountID)
+	_, err := n.conn.RequestWithContext(ctx, subject, []byte(ajwt))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func checkReplyForError(msg []byte) error {
 	var msgData UpdateReply
 	err := json.Unmarshal(msg, &msgData)

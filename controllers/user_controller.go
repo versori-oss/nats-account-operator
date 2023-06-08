@@ -29,7 +29,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -97,7 +96,13 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 		}
 	}()
 
-	if err := r.ensureCredsSecrets(ctx, usr); err != nil {
+	skSeed, err := r.ensureAccountResolved(ctx, usr)
+	if err != nil {
+		logger.Error(err, "failed to ensure owner resolved")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.ensureCredsSecrets(ctx, usr, skSeed); err != nil {
 		logger.Error(err, "failed to ensure JWT seed secrets")
 		return ctrl.Result{}, err
 	}
@@ -105,31 +110,49 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 	return ctrl.Result{}, nil
 }
 
-func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsnatsiov1alpha1.User) error {
+func (r *UserReconciler) ensureAccountResolved(ctx context.Context, usr *accountsnatsiov1alpha1.User) ([]byte, error) {
 	logger := log.FromContext(ctx)
 
-	_, errSeed := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.SeedSecretName, metav1.GetOptions{})
+	sKey, err := r.AccountsClientSet.SigningKeys(usr.Namespace).Get(ctx, usr.Spec.SigningKey.Ref.Name, metav1.GetOptions{})
+	if err != nil {
+		usr.Status.MarkAccountResolveFailed("failed to get signing key for user", "")
+		logger.Info("failed to get signing key for user", "user: %s", usr.Name)
+		return []byte{}, err
+	}
+
+	skOwnerRef := sKey.Status.OwnerRef
+	skOwnerRuntimeObj, _ := r.Scheme.New(skOwnerRef.GetGroupVersionKind())
+
+	switch skOwnerRuntimeObj.(type) {
+	case *accountsnatsiov1alpha1.Account:
+		usr.Status.MarkAccountResolved(accountsnatsiov1alpha1.InferredObjectReference{
+			Namespace: skOwnerRef.Namespace,
+			Name:      skOwnerRef.Name,
+		})
+	default:
+		usr.Status.MarkAccountResolveFailed("invalid signing key owner type", "signing key type: %s", skOwnerRef.Kind)
+		return []byte{}, errors.NewBadRequest("invalid signing key owner type")
+	}
+
+	skSeedSecret, err := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, sKey.Spec.SeedSecretName, metav1.GetOptions{})
+	if err != nil {
+		logger.Info("failed to get seed for signing key")
+		return []byte{}, err
+	}
+
+	return skSeedSecret.Data["seed"], nil
+}
+
+func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsnatsiov1alpha1.User, skSeed []byte) error {
+	logger := log.FromContext(ctx)
+
+	sSec, errSeed := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.SeedSecretName, metav1.GetOptions{})
 	_, errJWT := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.JWTSecretName, metav1.GetOptions{})
-	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) {
-		sKey, err := r.AccountsClientSet.SigningKeys(usr.Namespace).Get(ctx, usr.Spec.SigningKey.Ref.Name, metav1.GetOptions{})
-		if err != nil {
-			logger.Info("signing key not found")
-			usr.Status.MarkAccountResolveFailed("signing key not found", "%s:%s", usr.Spec.SigningKey.Ref.Namespace, usr.Spec.SigningKey.Ref.Name)
-			return nil
-		}
-		if sKey.Status.OwnerRef.Kind != "Account" {
-			logger.Info("signing key not owned by account")
-			usr.Status.MarkAccountResolveFailed("signing key not owned by an account", "%s:%s", usr.Spec.SigningKey.Ref.Namespace, usr.Spec.SigningKey.Ref.Name)
-			return nil
-		}
+	_, errCreds := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.CredentialsSecretName, metav1.GetOptions{})
+	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) || errors.IsNotFound(errCreds) {
+		// one or the other is not found, so re-create them all
 
-		skSeedSecret, err := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, sKey.Spec.SeedSecretName, metav1.GetOptions{})
-		if err != nil {
-			logger.Error(err, "failed to get signing key seed secret")
-			return err
-		}
-
-		kPair, err := nkeys.FromSeed(skSeedSecret.Data["seed"])
+		kPair, err := nkeys.FromSeed(skSeed)
 		if err != nil {
 			logger.Error(err, "failed to make key pair from seed")
 			return err
@@ -147,7 +170,6 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 			return err
 		}
 
-		// now create the secrets for the jkt and seed TODO @JoeLanglands add labels and annotations
 		jwtSecret := NewSecret(usr.Spec.JWTSecretName, usr.Namespace, WithData(map[string][]byte{"jwt": []byte(ujwt)}), WithImmutable(true))
 		if _, err = r.CV1Interface.Secrets(usr.Namespace).Create(ctx, &jwtSecret, metav1.CreateOptions{}); err != nil {
 			logger.Error(err, "failed to create jwt secret")
@@ -159,7 +181,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 			return err
 		}
 
-		seedSecret := NewSecret(usr.Spec.SeedSecretName, usr.Namespace, WithData(map[string][]byte{"seed": seed}), WithImmutable(true))
+		seedSecret := NewSecret(usr.Spec.SeedSecretName, usr.Namespace, WithData(map[string][]byte{"seed": seed, "publicKey": []byte(publicKey)}), WithImmutable(true))
 		if _, err := r.CV1Interface.Secrets(usr.Namespace).Create(ctx, &seedSecret, metav1.CreateOptions{}); err != nil {
 			logger.Error(err, "failed to create seed secret")
 			return err
@@ -186,16 +208,28 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 			logger.Error(err, "failed to set user as owner of creds secret")
 			return err
 		}
-
 		usr.Status.MarkCredentialsSecretReady()
 		usr.Status.MarkJWTSecretReady()
 		usr.Status.MarkSeedSecretReady(publicKey, usr.Spec.SeedSecretName)
-	} else if errSeed != nil || errJWT != nil {
-		// TODO @JoeLanglands change this shit
-		err := multierr.Append(errSeed, errJWT)
-		logger.Error(err, "failed to get jwt or seed secret")
-		return err
+	} else if errSeed != nil {
+		// going to actually return and log errors here as something could have gone genuinely wrong
+		logger.Error(errSeed, "failed to get seed secret")
+		usr.Status.MarkSeedSecretUnknown("failed to get seed secret", "")
+		return errSeed
+	} else if errJWT != nil {
+		logger.Error(errJWT, "failed to get jwt secret")
+		usr.Status.MarkJWTSecretUnknown("failed to get jwt secret", "")
+		return errJWT
+	} else if errCreds != nil {
+		logger.Error(errCreds, "failed to get credentials secret")
+		usr.Status.MarkCredentialsSecretUnknown("failed to get credentials secrets", "")
+		return errCreds
 	}
+
+	// if we reach here they must all be there in some capacity
+	usr.Status.MarkJWTSecretReady()
+	usr.Status.MarkSeedSecretReady(string(sSec.Data["publicKey"]), usr.Spec.SeedSecretName)
+	usr.Status.MarkCredentialsSecretReady()
 
 	return nil
 }

@@ -207,15 +207,17 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 	}
 
 	operatorPublicKey := string(seedSecret.Data["publicKey"])
+	// TODO @JoeLanglands you're going to need to update the JWT when a new signing key is added!! Same goes for accounts
+	// probably do this in the ensure signing key function
 
-	_, err = r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
+	jwtSec, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		op := jwt.Operator{
 			Identities:          convertToNATSIdentities(operator.Spec.Identities),
 			SigningKeys:         sKeysPublicKeys,
-			AccountServerURL:    "",         // TODO @JoeLanglands figure out how to get this
-			OperatorServiceURLs: []string{}, // TODO @JoeLanglands figure out how to get this
-			SystemAccount:       sysAccId,   // This should be resolved at this point
+			AccountServerURL:    operator.Spec.AccountServerURL,
+			OperatorServiceURLs: operator.Spec.OperatorServiceURLs,
+			SystemAccount:       sysAccId, // This should be resolved at this point
 		}
 		opClaims := jwt.NewOperatorClaims(operator.Status.KeyPair.PublicKey)
 		opClaims.Name = operator.Name
@@ -253,15 +255,18 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 
 		_, err = r.CV1Interface.Secrets(operator.Namespace).Create(ctx, &jwtSecret, metav1.CreateOptions{})
 		if err != nil {
+			operator.Status.MarkJWTSecretFailed("failed to create jwt secret for operator", "operator: %s", operator.Name)
 			logger.Error(err, "failed to create jwt secret")
 			return err
 		}
 
 	} else if err != nil {
+		operator.Status.MarkJWTSecretFailed("could not find JWT secret for operator", "operator: %s", operator.Name)
 		logger.Error(err, "failed to get jwt secret")
-		operator.Status.MarkJWTSecretFailed("Could not find JWT secret", "failed to get jwt secret: %s", err.Error())
 		return err
 	}
+
+	// check if signing keys have changed, if so update the jwt secret
 
 	operator.Status.MarkJWTSecretReady()
 	return nil
@@ -271,7 +276,7 @@ func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, opera
 	logger := log.FromContext(ctx)
 
 	skList, err := r.AccountsClientSet.SigningKeys(operator.Namespace).List(ctx, metav1.ListOptions{})
-	if errors.IsNotFound(err) {
+	if err == nil && len(skList.Items) == 0 {
 		logger.Info("no signing keys found")
 		operator.Status.MarkSigningKeysUpdateUnknown("no signing keys found", "")
 		return nil, nil
@@ -377,7 +382,7 @@ func (r *OperatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					return nil
 				}
 
-				operatorGVK := (&accountsnatsiov1alpha1.Operator{}).GetObjectKind().GroupVersionKind()
+				operatorGVK := accountsnatsiov1alpha1.GroupVersion.WithKind("Operator")
 				if operatorGVK != ownerRef.GetGroupVersionKind() {
 					// TODO @JoeLanglands remove this log once we're happy the != is handled correctly
 					logger.V(1).Info("SigningKey watcher received SigningKey with non-operator owner",

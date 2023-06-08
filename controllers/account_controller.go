@@ -29,7 +29,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
@@ -128,7 +127,7 @@ func (r *AccountReconciler) ensureSigningKeysUpdated(ctx context.Context, acc *a
 	logger := log.FromContext(ctx)
 
 	skList, err := r.AccountsClientSet.SigningKeys(acc.Namespace).List(ctx, metav1.ListOptions{})
-	if errors.IsNotFound(err) {
+	if err == nil && len(skList.Items) == 0 {
 		logger.Info("no signing keys found")
 		acc.Status.MarkSigningKeysUpdateUnknown("no signing keys found", "")
 		return nil, nil
@@ -180,7 +179,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 	logger := log.FromContext(ctx)
 
 	_, errSeed := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, acc.Spec.SeedSecretName, metav1.GetOptions{})
-	_, errJWT := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, acc.Spec.JWTSecretName, metav1.GetOptions{})
+	jwtSec, errJWT := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, acc.Spec.JWTSecretName, metav1.GetOptions{})
 
 	var sKeysPublicKeys []string
 	for _, sk := range sKeys {
@@ -190,6 +189,9 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 	// if one or the other does not exist, then create them both
 	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) {
 		// find the signing key from the spec and verify it belongs to an operator.
+
+		// TODO @JoeLanglands might be better to do this in the sameway that a signing key resolves its owner. See signing key controller ensureOwnerResolved
+		// Check ensureAccountResolved in user_controller. This should form the basis of ensureOperatorResolved too!
 		sKey, err := r.AccountsClientSet.SigningKeys(acc.Namespace).Get(ctx, acc.Spec.SigningKey.Ref.Name, metav1.GetOptions{})
 		if err != nil {
 			logger.Info("failed to get signing key", "signing key", acc.Spec.SigningKey.Ref.Name)
@@ -231,7 +233,6 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		// now create the secrets for the jwt and seed TODO @JoeLanglands add labels and annotations
 		jwtSecret := NewSecret(acc.Spec.JWTSecretName, acc.Namespace, WithData(map[string][]byte{"jwt": []byte(ajwt)}), WithImmutable(true))
 		if err := ctrl.SetControllerReference(acc, &jwtSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set account as owner of jwt secret")
@@ -262,10 +263,48 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 		acc.Status.MarkJWTPushed()
 		acc.Status.MarkJWTSecretReady()
 		acc.Status.MarkSeedSecretReady(publicKey, seedSecret.Name)
-	} else if errSeed != nil || errJWT != nil {
-		// TODO @JoeLanglands change this shit
-		err := multierr.Append(errSeed, errJWT)
-		logger.Error(err, "failed to get seed or jwt secret")
+	} else if errSeed != nil {
+		// logging and returning errors here since something could have actually gone wrong
+		acc.Status.MarkSeedSecretUnknown("failed to get seed secret", "")
+		logger.Error(errSeed, "failed to get seed secret")
+		return errSeed
+	} else if errJWT != nil {
+		acc.Status.MarkJWTSecretUnknown("failed to get jwt secret", "")
+		acc.Status.MarkJWTPushUnknown("failed to get jwt secret", "")
+		logger.Error(errJWT, "failed to get jwt secret")
+		return errJWT
+	} else {
+		// check if signing keys have been updated, if so update the jwt with the new signing keys
+		accJWTEncoded := string(jwtSec.Data["jwt"])
+		accClaims, err := jwt.DecodeAccountClaims(accJWTEncoded)
+		if err != nil {
+			logger.Error(err, "failed to decode account jwt")
+			acc.Status.MarkJWTPushUnknown("failed to decode account jwt", "error: %s", err)
+			return err
+		}
+
+		// if accClaims.SigningKeys
+
+		// if we get here then the seed and jwts secrets should exist, check if the jwt has been pushed to NATS
+		jwt, err := r.NatsClient.GetAccountJWT(ctx, acc.Status.KeyPair.PublicKey)
+		if err != nil {
+			// something else is wrong, so report the error
+			logger.Error(err, "failed to get account jwt from nats server")
+			acc.Status.MarkJWTPushUnknown("failed to get account jwt from nats server", "error: %s", err)
+			return err
+		}
+		if jwt == "" {
+			// jwt isn't pushed to NATS, try to push it
+			err2 := r.NatsClient.PushAccountJWT(ctx, string(jwtSec.Data["jwt"]))
+			if err2 != nil {
+				logger.Error(err2, "failed to push account jwt to nats server")
+				acc.Status.MarkJWTPushFailed("failed to push account jwt to nats server", "error: %s", err)
+				return err2
+			}
+		}
+		acc.Status.MarkJWTPushed()
+		acc.Status.MarkSeedSecretReady(acc.Status.KeyPair.PublicKey, acc.Status.KeyPair.SeedSecretName)
+		acc.Status.MarkJWTSecretReady()
 	}
 
 	return nil
@@ -292,7 +331,7 @@ func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					return nil
 				}
 
-				accountGVK := (&accountsnatsiov1alpha1.Account{}).GetObjectKind().GroupVersionKind()
+				accountGVK := accountsnatsiov1alpha1.GroupVersion.WithKind("Account")
 				if accountGVK != ownerRef.GetGroupVersionKind() {
 					logger.V(1).Info("SigningKey watcher received SigningKey with non-account owner",
 						"owner", ownerRef.GetGroupVersionKind().String())
