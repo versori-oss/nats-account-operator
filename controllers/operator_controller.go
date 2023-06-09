@@ -198,6 +198,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 	seedSecret, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.SeedSecretName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		logger.V(1).Info("seed secret not found, skipping jwt secret creation")
+		operator.Status.MarkJWTSecretFailed("seed secret not found", "")
 		return nil
 	}
 
@@ -207,8 +208,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 	}
 
 	operatorPublicKey := string(seedSecret.Data["publicKey"])
-	// TODO @JoeLanglands you're going to need to update the JWT when a new signing key is added!! Same goes for accounts
-	// probably do this in the ensure signing key function
+	// TODO @JoeLanglands you're going to need to update the JWT when a new signing key is added!!
 
 	jwtSec, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
@@ -264,9 +264,16 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 		operator.Status.MarkJWTSecretFailed("could not find JWT secret for operator", "operator: %s", operator.Name)
 		logger.Error(err, "failed to get jwt secret")
 		return err
+	} else {
+		// jwtSecret exists, so update it with signing keys
+		// Note: inefficient, but see comment in account_controller.go
+		err := r.updateOperatorJWTSigningKeys(ctx, seedSecret.Data["seed"], jwtSec, sKeysPublicKeys)
+		if err != nil {
+			logger.V(1).Info("failed to update operator JWT with signing keys", "error", err)
+			operator.Status.MarkJWTSecretFailed("failed to update JWT with signing keys", "")
+			return nil
+		}
 	}
-
-	// check if signing keys have changed, if so update the jwt secret
 
 	operator.Status.MarkJWTSecretReady()
 	return nil
@@ -277,7 +284,7 @@ func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, opera
 
 	skList, err := r.AccountsClientSet.SigningKeys(operator.Namespace).List(ctx, metav1.ListOptions{})
 	if err == nil && len(skList.Items) == 0 {
-		logger.Info("no signing keys found")
+		logger.V(1).Info("no signing keys found")
 		operator.Status.MarkSigningKeysUpdateUnknown("no signing keys found", "")
 		return nil, nil
 	} else if err != nil {
@@ -297,7 +304,7 @@ func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, opera
 	}
 
 	if len(signingKeys) == 0 {
-		logger.Info("no signing keys found for operator")
+		logger.V(1).Info("no signing keys found for operator")
 		operator.Status.MarkSigningKeysUpdateUnknown("no signing keys found for operator", "operator: %s", operator.Name)
 		return nil, nil
 	}
@@ -330,6 +337,39 @@ func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, op
 	return sysAcc.Status.KeyPair.PublicKey, nil
 }
 
+func (r *OperatorReconciler) updateOperatorJWTSigningKeys(ctx context.Context, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string) error {
+	logger := log.FromContext(ctx)
+
+	operatorJWTEncoded := string(jwtSecret.Data["jwt"])
+	opClaims, err := jwt.DecodeOperatorClaims(operatorJWTEncoded)
+	if err != nil {
+		logger.Error(err, "failed to decode operator jwt")
+		return err
+	}
+
+	opClaims.SigningKeys = jwt.StringList(sKeys)
+
+	kPair, err := nkeys.FromSeed(operatorSeed)
+	if err != nil {
+		logger.Error(err, "failed to get nkeys from seed")
+		return err
+	}
+	ojwt, err := opClaims.Encode(kPair)
+	if err != nil {
+		logger.Error(err, "failed to encode operator jwt")
+		return err
+	}
+
+	jwtSecret.Data["jwt"] = []byte(ojwt)
+	_, err = r.CV1Interface.Secrets(jwtSecret.Namespace).Update(ctx, jwtSecret, metav1.UpdateOptions{})
+	if err != nil {
+		logger.Error(err, "failed to update jwt secret")
+		return err
+	}
+
+	return nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *OperatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	logger := mgr.GetLogger().WithName("OperatorReconciler")
@@ -344,7 +384,7 @@ func (r *OperatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				// belongs
 				account, ok := obj.(*accountsnatsiov1alpha1.Account)
 				if !ok {
-					logger.Info("Account watcher received non-Account object",
+					logger.V(1).Info("Account watcher received non-Account object",
 						"kind", obj.GetObjectKind().GroupVersionKind().String())
 
 					return nil
@@ -371,7 +411,7 @@ func (r *OperatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				// if so, reconcile it.
 				signingKey, ok := obj.(*accountsnatsiov1alpha1.SigningKey)
 				if !ok {
-					logger.Info("SigningKey watcher received non-SigningKey object",
+					logger.V(1).Info("SigningKey watcher received non-SigningKey object",
 						"kind", obj.GetObjectKind().GroupVersionKind().String())
 
 					return nil

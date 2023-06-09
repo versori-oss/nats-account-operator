@@ -96,13 +96,13 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 		}
 	}()
 
-	skSeed, err := r.ensureAccountResolved(ctx, usr)
+	accSKey, err := r.ensureAccountResolved(ctx, usr)
 	if err != nil {
 		logger.Error(err, "failed to ensure owner resolved")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureCredsSecrets(ctx, usr, skSeed); err != nil {
+	if err := r.ensureCredsSecrets(ctx, usr, accSKey); err != nil {
 		logger.Error(err, "failed to ensure JWT seed secrets")
 		return ctrl.Result{}, err
 	}
@@ -136,14 +136,14 @@ func (r *UserReconciler) ensureAccountResolved(ctx context.Context, usr *account
 
 	skSeedSecret, err := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, sKey.Spec.SeedSecretName, metav1.GetOptions{})
 	if err != nil {
-		logger.Info("failed to get seed for signing key")
+		logger.Info("failed to get account seed for signing key", "account: %s", usr.Status.AccountRef.Name, "signing key: %s", sKey.Name)
 		return []byte{}, err
 	}
 
 	return skSeedSecret.Data["seed"], nil
 }
 
-func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsnatsiov1alpha1.User, skSeed []byte) error {
+func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsnatsiov1alpha1.User, accSKey []byte) error {
 	logger := log.FromContext(ctx)
 
 	sSec, errSeed := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.SeedSecretName, metav1.GetOptions{})
@@ -152,7 +152,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) || errors.IsNotFound(errCreds) {
 		// one or the other is not found, so re-create them all
 
-		kPair, err := nkeys.FromSeed(skSeed)
+		kPair, err := nkeys.FromSeed(accSKey)
 		if err != nil {
 			logger.Error(err, "failed to make key pair from seed")
 			return err
