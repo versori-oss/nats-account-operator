@@ -226,7 +226,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		jwtSecret := NewSecret(acc.Spec.JWTSecretName, acc.Namespace, WithData(map[string][]byte{"jwt": []byte(ajwt)}), WithImmutable(true))
+		jwtSecret := NewSecret(acc.Spec.JWTSecretName, acc.Namespace, WithData(map[string][]byte{"jwt": []byte(ajwt)}), WithImmutable(false))
 		if err := ctrl.SetControllerReference(acc, &jwtSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set account as owner of jwt secret")
 			return err

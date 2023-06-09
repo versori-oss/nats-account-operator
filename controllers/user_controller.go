@@ -198,7 +198,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 			usr.Status.MarkCredentialsSecretFailed("failed to format user creds", "")
 			return nil
 		}
-		credsSecret := NewSecret(usr.Spec.CredentialsSecretName, usr.Namespace, WithData(map[string][]byte{"creds": []byte(userCreds)}), WithImmutable(true))
+		credsSecret := NewSecret(usr.Spec.CredentialsSecretName, usr.Namespace, WithData(map[string][]byte{"creds": []byte(userCreds)}), WithImmutable(false))
 		if _, err := r.CV1Interface.Secrets(usr.Namespace).Create(ctx, &credsSecret, metav1.CreateOptions{}); err != nil {
 			logger.Error(err, "failed to create creds secret")
 			return err

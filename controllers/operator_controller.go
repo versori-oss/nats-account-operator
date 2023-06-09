@@ -245,7 +245,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 			"operator-name": operator.Name,
 		}
 
-		jwtSecret := NewSecret(operator.Spec.JWTSecretName, operator.Namespace, WithData(data), WithLabels(labels), WithImmutable(true))
+		jwtSecret := NewSecret(operator.Spec.JWTSecretName, operator.Namespace, WithData(data), WithLabels(labels), WithImmutable(false))
 
 		err = ctrl.SetControllerReference(operator, &jwtSecret, r.Scheme)
 		if err != nil {
