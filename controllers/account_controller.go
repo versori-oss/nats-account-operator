@@ -75,6 +75,8 @@ type AccountReconciler struct {
 func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	logger := log.FromContext(ctx)
 
+	logger.V(1).Info("reconciling account", "account", req.Name)
+
 	acc := new(accountsnatsiov1alpha1.Account)
 	if err := r.Client.Get(ctx, req.NamespacedName, acc); err != nil {
 		if errors.IsNotFound(err) {
@@ -95,7 +97,7 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 		if !equality.Semantic.DeepEqual(originalStatus, acc.Status) {
 			if err = r.Status().Update(ctx, acc); err != nil {
 				if errors.IsConflict(err) {
-					result.RequeueAfter = time.Second * 5
+					result.RequeueAfter = time.Second * 30
 					return
 				}
 				logger.Error(err, "failed to update account status")
@@ -106,12 +108,21 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 
 	opSKey, err := r.ensureOperatorResolved(ctx, acc)
 	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("operator owner not found, requeuing")
+			result.RequeueAfter = time.Second * 30
+			return
+		}
 		logger.Error(err, "failed to ensure the operator owning the account was resolved")
 		return ctrl.Result{}, err
 	}
 
 	sKeys, err := r.ensureSigningKeysUpdated(ctx, acc)
 	if err != nil {
+		if errors.IsNotFound(err) {
+			result.RequeueAfter = time.Second * 30
+			return
+		}
 		logger.Error(err, "failed to ensure signing keys were updated")
 		return ctrl.Result{}, err
 	}
@@ -131,7 +142,7 @@ func (r *AccountReconciler) ensureSigningKeysUpdated(ctx context.Context, acc *a
 	if err == nil && len(skList.Items) == 0 {
 		logger.Info("no signing keys found")
 		acc.Status.MarkSigningKeysUpdateUnknown("no signing keys found", "")
-		return nil, nil
+		return nil, errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
 	} else if err != nil {
 		logger.Error(err, "failed to list signing keys")
 		return nil, err
@@ -139,21 +150,18 @@ func (r *AccountReconciler) ensureSigningKeysUpdated(ctx context.Context, acc *a
 
 	signingKeys := make([]accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, 0)
 	for _, sk := range skList.Items {
-		if sk.Status.OwnerRef.Namespace == acc.Namespace && sk.Status.OwnerRef.Name == acc.Name {
+		if sk.Status.IsReady() && sk.Status.OwnerRef.Namespace == acc.Namespace && sk.Status.OwnerRef.Name == acc.Name {
 			signingKeys = append(signingKeys, accountsnatsiov1alpha1.SigningKeyEmbeddedStatus{
-				Name: sk.Name,
-				KeyPair: accountsnatsiov1alpha1.KeyPair{
-					PublicKey:      sk.Status.KeyPair.PublicKey,
-					SeedSecretName: sk.Status.KeyPair.SeedSecretName,
-				},
+				Name:    sk.GetName(),
+				KeyPair: *sk.Status.KeyPair,
 			})
 		}
 	}
 
 	if len(signingKeys) == 0 {
-		logger.Info("no signing keys found for account")
-		acc.Status.MarkSigningKeysUpdateUnknown("no signing keys found for account", "account: %s", acc.Name)
-		return nil, nil
+		logger.V(1).Info("no ready signing keys found for account")
+		acc.Status.MarkSigningKeysUpdateUnknown("no ready signing keys found for account", "account: %s", acc.Name)
+		return nil, errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
 	}
 
 	acc.Status.MarkSigningKeysUpdated(signingKeys)
@@ -168,6 +176,10 @@ func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *acc
 		acc.Status.MarkOperatorResolveFailed("failed to get signing key reference for accout", "")
 		logger.Info("failed to get signing key reference for account", "account: %s", acc.Name, "signing key name: %s", acc.Spec.SigningKey.Ref.Name)
 		return []byte{}, err
+	}
+
+	if !sKey.Status.GetCondition(accountsnatsiov1alpha1.SigningKeyConditionOwnerResolved).IsTrue() {
+		return []byte{}, errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.SigningKey{}.ResourceVersion), sKey.Name)
 	}
 
 	skOwnerRef := sKey.Status.OwnerRef
@@ -203,6 +215,8 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 	for _, sk := range sKeys {
 		sKeysPublicKeys = append(sKeysPublicKeys, sk.KeyPair.PublicKey)
 	}
+
+	//TODO @JoeLanglands test whether if one exists, just re-creating it works ok or do I need to do some checks and use Update()
 
 	// if one or the other does not exist, then create them both
 	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) {
@@ -256,6 +270,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 		acc.Status.MarkJWTPushed()
 		acc.Status.MarkJWTSecretReady()
 		acc.Status.MarkSeedSecretReady(publicKey, seedSecret.Name)
+		return nil
 	} else if errSeed != nil {
 		// logging and returning errors here since something could have actually gone wrong
 		acc.Status.MarkSeedSecretUnknown("failed to get seed secret", "")
@@ -267,25 +282,27 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 		logger.Error(errJWT, "failed to get jwt secret")
 		return errJWT
 	} else {
-		// both secrets exist, now update the jwt with signing keys
-		// Note that this is inefficient because it doesn't check for changes, it instead updates it everytime. However:
-		// 1. I would need to write a piece of code that decodes the jwt, and then checks if all the signing keys passed into this function
-		//     exist in the jwt. Can't use slices.Equal because that checks for order as well. Happy to write this if it's needed.
-		// 2. Could check if the secret jwt == ajwt, but I can envision other parts of the jwt being updated like limits etc so this is not
-		//    a good check.
+		// TODO @JoeLanglands YOU NEED TO Check whether the jwt needs updating with new signing keys. You CANNOT update it every reconcile
+		// because the secrets are updated of which the account owns therefore triggerening a cascade of reconciliations.  Used acc.Status.IsReady()
+		// here to simulate it not needing updating.
+		if !acc.Status.IsReady() {
+			err := r.updateAccountJWTSigningKeys(ctx, opSkey, jwtSec, sKeysPublicKeys)
+			if err != nil {
+				logger.V(1).Info("failed to update account JWT with signing keys", "error", err)
+				acc.Status.MarkJWTPushUnknown("failed to update account JWT with signing keys", "")
+				acc.Status.MarkJWTSecretUnknown("failed to update account JWT with signing keys", "")
+				return nil
+			}
 
-		err := r.updateAccountJWTSigningKeys(ctx, opSkey, jwtSec, sKeysPublicKeys)
-		if err != nil {
-			logger.V(1).Info("failed to update account JWT with signing keys", "error", err)
-			acc.Status.MarkJWTPushUnknown("failed to update account JWT with signing keys", "")
-			acc.Status.MarkJWTSecretUnknown("failed to update account JWT with signing keys", "")
-			return nil
 		}
 	}
 
-	acc.Status.MarkJWTPushed()
-	acc.Status.MarkSeedSecretReady(acc.Status.KeyPair.PublicKey, acc.Status.KeyPair.SeedSecretName)
-	acc.Status.MarkJWTSecretReady()
+	// TODO @JoeLanglands Do I even need to do these?
+	// acc.Status.MarkJWTPushed()
+	// // TODO @JoeLanglands - Don't use acc.Status here I think. It can cause a panic but this bit seems unclear
+	// // also its self-referential with the fields being passed/set which is just stupid by me
+	// acc.Status.MarkSeedSecretReady(acc.Status.KeyPair.PublicKey, acc.Status.KeyPair.SeedSecretName)
+	// acc.Status.MarkJWTSecretReady()
 
 	return nil
 }
@@ -353,8 +370,6 @@ func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 				accountGVK := accountsnatsiov1alpha1.GroupVersion.WithKind("Account")
 				if accountGVK != ownerRef.GetGroupVersionKind() {
-					logger.V(1).Info("SigningKey watcher received SigningKey with non-account owner",
-						"owner", ownerRef.GetGroupVersionKind().String())
 					return nil
 				}
 

@@ -28,6 +28,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -72,11 +73,15 @@ type SigningKeyReconciler struct {
 func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	logger := log.FromContext(ctx)
 
+	logger.V(1).Info("reconciling signing key", "name", req.Name)
+
 	signingKey := new(accountsnatsiov1alpha1.SigningKey)
 	if err := r.Get(ctx, req.NamespacedName, signingKey); err != nil {
 		if errors.IsNotFound(err) {
-			logger.V(1).Info("signing key not found")
-			return ctrl.Result{}, nil
+			logger.V(1).Info("signing key not found or not ready")
+			return ctrl.Result{
+				RequeueAfter: 30 * time.Second,
+			}, nil
 		}
 		logger.Error(err, "failed to fetch signing key")
 		return ctrl.Result{}, err
@@ -93,7 +98,7 @@ func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}()
 
 	if err := r.ensureOwnerResolved(ctx, signingKey); err != nil {
-		logger.Error(err, "failed to ensure owner resolved")
+		logger.V(1).Info("failed to resolve owner for signing key", "name", signingKey.Name)
 		signingKey.Status.MarkOwnerResolveFailed("failed to resolve owner", "%s:%s", signingKey.Spec.OwnerRef.Name, signingKey.Spec.OwnerRef.Kind)
 		return ctrl.Result{}, err
 	}
@@ -113,9 +118,9 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *ac
 	if errors.IsNotFound(err) {
 		var keyPair nkeys.KeyPair
 		switch signingKey.Spec.OwnerRef.Kind {
-		case "Account":
+		case accountsnatsiov1alpha1.SigningKeyTypeAccount:
 			keyPair, err = nkeys.CreateAccount()
-		case "Operator":
+		case accountsnatsiov1alpha1.SigningKeyTypeOperator:
 			keyPair, err = nkeys.CreateOperator()
 		default:
 			err := errors.NewBadRequest(fmt.Sprintf("unknown owner kind: %s", signingKey.Spec.OwnerRef.Kind))
@@ -200,12 +205,6 @@ func (r *SigningKeyReconciler) ensureOwnerResolved(ctx context.Context, signingK
 
 		logger.Info("failed to fetch signing key owner")
 
-		return err
-	}
-
-	// set the owner reference of this signing key to the owner operator/account
-	if err := ctrl.SetControllerReference(ownerObj, signingKey, r.Scheme); err != nil {
-		logger.Error(err, "failed to set owner reference of signing key")
 		return err
 	}
 

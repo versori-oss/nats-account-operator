@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -71,6 +72,8 @@ type OperatorReconciler struct {
 func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	logger := log.FromContext(ctx)
 
+	logger.V(1).Info("reconciling operator", "name", req.Name)
+
 	operator := new(accountsnatsiov1alpha1.Operator)
 	if err := r.Get(ctx, req.NamespacedName, operator); err != nil {
 		if errors.IsNotFound(err) {
@@ -104,7 +107,7 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 	sysAccId, err := r.ensureSystemAccountResolved(ctx, operator)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			logger.V(1).Info("system account not found, requeuing")
+			logger.V(1).Info("system account not found or not ready, requeuing")
 			return ctrl.Result{RequeueAfter: time.Second * 30}, nil
 		}
 		logger.Error(err, "failed to ensure system account resolved")
@@ -120,6 +123,11 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 
 	sKeys, err := r.ensureSigningKeysUpdated(ctx, operator)
 	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("signing keys not found, requeuing")
+			result.RequeueAfter = time.Second * 30
+			return
+		}
 		logger.Error(err, "failed to ensure signing keys")
 
 		return ctrl.Result{}, err
@@ -143,7 +151,7 @@ func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *acc
 	if errors.IsNotFound(err) {
 		keyPair, err := nkeys.CreateOperator()
 		if err != nil {
-			logger.Error(err, "failed to create operator key pair")
+			logger.Error(err, "failed to create operator sk pair")
 			return err
 		}
 		seed, err := keyPair.Seed()
@@ -153,7 +161,7 @@ func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *acc
 		}
 		publicKey, err = keyPair.PublicKey()
 		if err != nil {
-			logger.Error(err, "failed to get operator public key")
+			logger.Error(err, "failed to get operator public sk")
 			return err
 		}
 
@@ -208,7 +216,6 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 	}
 
 	operatorPublicKey := string(seedSecret.Data["publicKey"])
-	// TODO @JoeLanglands you're going to need to update the JWT when a new signing key is added!!
 
 	jwtSec, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
@@ -265,13 +272,16 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 		logger.Error(err, "failed to get jwt secret")
 		return err
 	} else {
-		// jwtSecret exists, so update it with signing keys
-		// Note: inefficient, but see comment in account_controller.go
-		err := r.updateOperatorJWTSigningKeys(ctx, seedSecret.Data["seed"], jwtSec, sKeysPublicKeys)
-		if err != nil {
-			logger.V(1).Info("failed to update operator JWT with signing keys", "error", err)
-			operator.Status.MarkJWTSecretFailed("failed to update JWT with signing keys", "")
-			return nil
+		// Need to check if the operator JWT actually needs updating with new signing keys. You CANNOT do this every reconcile loop no matter what
+		// see comment in accounts controller for more info
+		if !operator.Status.IsReady() {
+			err := r.updateOperatorJWTSigningKeys(ctx, seedSecret.Data["seed"], jwtSec, sKeysPublicKeys)
+			if err != nil {
+				logger.V(1).Info("failed to update operator JWT with signing keys", "error", err)
+				operator.Status.MarkJWTSecretFailed("failed to update JWT with signing keys", "")
+				return nil
+			}
+
 		}
 	}
 
@@ -286,27 +296,26 @@ func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, opera
 	if err == nil && len(skList.Items) == 0 {
 		logger.V(1).Info("no signing keys found")
 		operator.Status.MarkSigningKeysUpdateUnknown("no signing keys found", "")
-		return nil, nil
+		return nil, errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
 	} else if err != nil {
 		logger.Error(err, "failed to list signing keys")
 		return nil, err
 	}
 
 	signingKeys := make([]accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, 0)
-	for _, key := range skList.Items {
-		if key.Status.OwnerRef.Name == operator.Name {
-			sKeyEmbedded := accountsnatsiov1alpha1.SigningKeyEmbeddedStatus{
-				Name:    key.GetName(),
-				KeyPair: *key.Status.KeyPair,
-			}
-			signingKeys = append(signingKeys, sKeyEmbedded)
+	for _, sk := range skList.Items {
+		if sk.Status.IsReady() && sk.Status.OwnerRef.Namespace == operator.Namespace && sk.Status.OwnerRef.Name == operator.Name {
+			signingKeys = append(signingKeys, accountsnatsiov1alpha1.SigningKeyEmbeddedStatus{
+				Name:    sk.GetName(),
+				KeyPair: *sk.Status.KeyPair,
+			})
 		}
 	}
 
 	if len(signingKeys) == 0 {
 		logger.V(1).Info("no signing keys found for operator")
 		operator.Status.MarkSigningKeysUpdateUnknown("no signing keys found for operator", "operator: %s", operator.Name)
-		return nil, nil
+		return nil, errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
 	}
 
 	operator.Status.MarkSigningKeysUpdated(signingKeys)
@@ -321,18 +330,25 @@ func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, op
 		Namespace: operator.Namespace,
 		Name:      operator.Spec.SystemAccountRef.Name,
 	}, &sysAcc); err != nil {
-		if errors.IsNotFound(err) {
-			operator.Status.MarkSystemAccountResolveFailed("System account not found", "")
-			return "", nil
-		}
-		logger.Error(err, "failed to get system account")
+		operator.Status.MarkSystemAccountResolveFailed("system account not found", "account name: %s", operator.Spec.SystemAccountRef.Name)
 		return "", err
+	} else {
+		operator.Status.MarkSystemAccountResolved(accountsnatsiov1alpha1.InferredObjectReference{
+			Namespace: sysAcc.GetNamespace(),
+			Name:      sysAcc.GetName(),
+		})
 	}
 
-	operator.Status.MarkSystemAccountResolved(accountsnatsiov1alpha1.InferredObjectReference{
-		Namespace: sysAcc.GetNamespace(),
-		Name:      sysAcc.GetName(),
-	})
+	if !sysAcc.Status.IsReady() {
+		logger.V(1).Info("system account not ready")
+		operator.Status.MarkSystemAccountNotReady("system account not ready", "")
+		return "", errors.NewNotFound(schema.GroupResource{
+			Group:    accountsnatsiov1alpha1.GroupVersion.Group,
+			Resource: accountsnatsiov1alpha1.Account{}.ResourceVersion,
+		}, operator.Spec.SystemAccountRef.Name)
+	} else {
+		operator.Status.MarkSystemAccountReady()
+	}
 
 	return sysAcc.Status.KeyPair.PublicKey, nil
 }
@@ -424,9 +440,6 @@ func (r *OperatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 				operatorGVK := accountsnatsiov1alpha1.GroupVersion.WithKind("Operator")
 				if operatorGVK != ownerRef.GetGroupVersionKind() {
-					// TODO @JoeLanglands remove this log once we're happy the != is handled correctly
-					logger.V(1).Info("SigningKey watcher received SigningKey with non-operator owner",
-						"owner", ownerRef.GetGroupVersionKind().String())
 
 					return nil
 				}
