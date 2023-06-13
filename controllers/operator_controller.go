@@ -171,8 +171,8 @@ func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *acc
 		}
 
 		data := map[string][]byte{
-			"seed":      seed,
-			"publicKey": []byte(publicKey),
+			accountsnatsiov1alpha1.NatsSecretSeedKey:      seed,
+			accountsnatsiov1alpha1.NatsSecretPublicKeyKey: []byte(publicKey),
 		}
 
 		seedSecret := NewSecret(operator.Spec.SeedSecretName, operator.Namespace, WithData(data), WithImmutable(true), WithLabels(labels))
@@ -192,7 +192,7 @@ func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *acc
 		logger.Error(err, "failed to get seed secret")
 		return err
 	} else {
-		publicKey = string(secret.Data["publicKey"])
+		publicKey = string(secret.Data[accountsnatsiov1alpha1.NatsSecretPublicKeyKey])
 	}
 
 	operator.Status.MarkSeedSecretReady(publicKey, secret.Name)
@@ -215,7 +215,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 		sKeysPublicKeys = append(sKeysPublicKeys, sk.KeyPair.PublicKey)
 	}
 
-	operatorPublicKey := string(seedSecret.Data["publicKey"])
+	operatorPublicKey := string(seedSecret.Data[accountsnatsiov1alpha1.NatsSecretPublicKeyKey])
 
 	jwtSec, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
@@ -233,7 +233,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 		opClaims.Type = jwt.OperatorClaim
 		opClaims.Operator = op
 
-		keys, err := nkeys.FromSeed(seedSecret.Data["seed"])
+		keys, err := nkeys.FromSeed(seedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey])
 		if err != nil {
 			logger.Error(err, "failed to get nkeys from seed")
 			return err
@@ -245,7 +245,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 		}
 
 		data := map[string][]byte{
-			"jwt": []byte(jwt),
+			accountsnatsiov1alpha1.NatsSecretJWTKey: []byte(jwt),
 		}
 
 		labels := map[string]string{
@@ -272,16 +272,11 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 		logger.Error(err, "failed to get jwt secret")
 		return err
 	} else {
-		// Need to check if the operator JWT actually needs updating with new signing keys. You CANNOT do this every reconcile loop no matter what
-		// see comment in accounts controller for more info
-		if !operator.Status.IsReady() {
-			err := r.updateOperatorJWTSigningKeys(ctx, seedSecret.Data["seed"], jwtSec, sKeysPublicKeys)
-			if err != nil {
-				logger.V(1).Info("failed to update operator JWT with signing keys", "error", err)
-				operator.Status.MarkJWTSecretFailed("failed to update JWT with signing keys", "")
-				return nil
-			}
-
+		err := r.updateOperatorJWTSigningKeys(ctx, seedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey], jwtSec, sKeysPublicKeys)
+		if err != nil {
+			logger.V(1).Info("failed to update operator JWT with signing keys", "error", err)
+			operator.Status.MarkJWTSecretFailed("failed to update JWT with signing keys", "")
+			return nil
 		}
 	}
 
@@ -356,11 +351,16 @@ func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, op
 func (r *OperatorReconciler) updateOperatorJWTSigningKeys(ctx context.Context, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string) error {
 	logger := log.FromContext(ctx)
 
-	operatorJWTEncoded := string(jwtSecret.Data["jwt"])
+	operatorJWTEncoded := string(jwtSecret.Data[accountsnatsiov1alpha1.NatsSecretJWTKey])
 	opClaims, err := jwt.DecodeOperatorClaims(operatorJWTEncoded)
 	if err != nil {
 		logger.Error(err, "failed to decode operator jwt")
 		return err
+	}
+
+	if isEqualUnordered(opClaims.SigningKeys, sKeys) {
+		logger.V(1).Info("operator jwt signing keys are up to date")
+		return nil
 	}
 
 	opClaims.SigningKeys = jwt.StringList(sKeys)
@@ -376,7 +376,7 @@ func (r *OperatorReconciler) updateOperatorJWTSigningKeys(ctx context.Context, o
 		return err
 	}
 
-	jwtSecret.Data["jwt"] = []byte(ojwt)
+	jwtSecret.Data[accountsnatsiov1alpha1.NatsSecretJWTKey] = []byte(ojwt)
 	_, err = r.CV1Interface.Secrets(jwtSecret.Namespace).Update(ctx, jwtSecret, metav1.UpdateOptions{})
 	if err != nil {
 		logger.Error(err, "failed to update jwt secret")

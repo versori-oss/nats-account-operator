@@ -143,8 +143,8 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *ac
 		}
 
 		data := map[string][]byte{
-			"seed":      seed,
-			"publicKey": []byte(publicKey),
+			accountsnatsiov1alpha1.NatsSecretSeedKey:      seed,
+			accountsnatsiov1alpha1.NatsSecretPublicKeyKey: []byte(publicKey),
 		}
 
 		labels := map[string]string{
@@ -168,7 +168,7 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *ac
 		logger.Error(err, "failed to fetch seed secret")
 		return err
 	} else {
-		publicKey = string(secret.Data["publicKey"])
+		publicKey = string(secret.Data[accountsnatsiov1alpha1.NatsSecretPublicKeyKey])
 	}
 
 	signingKey.Status.MarkSeedSecretReady(publicKey, signingKey.Spec.SeedSecretName)

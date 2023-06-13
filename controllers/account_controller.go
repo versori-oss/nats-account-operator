@@ -202,7 +202,7 @@ func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *acc
 		return []byte{}, err
 	}
 
-	return skSeedSecret.Data["seed"], nil
+	return skSeedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey], nil
 }
 
 func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accountsnatsiov1alpha1.Account, sKeys []accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, opSkey []byte) error {
@@ -216,9 +216,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 		sKeysPublicKeys = append(sKeysPublicKeys, sk.KeyPair.PublicKey)
 	}
 
-	//TODO @JoeLanglands test whether if one exists, just re-creating it works ok or do I need to do some checks and use Update()
-
-	// if one or the other does not exist, then create them both
+	// if one or the other does not exist, re-create the jwt and seed then update/create the secrets
 	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) {
 		accClaims := jwt.Account{
 			Imports:     convertToNATSImports(acc.Spec.Imports),
@@ -240,24 +238,44 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		jwtSecret := NewSecret(acc.Spec.JWTSecretName, acc.Namespace, WithData(map[string][]byte{"jwt": []byte(ajwt)}), WithImmutable(false))
+		jwtData := map[string][]byte{accountsnatsiov1alpha1.NatsSecretJWTKey: []byte(ajwt)}
+		jwtSecret := NewSecret(acc.Spec.JWTSecretName, acc.Namespace, WithData(jwtData), WithImmutable(false))
 		if err := ctrl.SetControllerReference(acc, &jwtSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set account as owner of jwt secret")
 			return err
 		}
-		if _, err = r.CV1Interface.Secrets(acc.Namespace).Create(ctx, &jwtSecret, metav1.CreateOptions{}); err != nil {
-			logger.Error(err, "failed to create jwt secret")
-			return err
+
+		if errJWT != nil {
+			// jwt secret already exists so Update instead of Create
+			if _, err = r.CV1Interface.Secrets(acc.Namespace).Update(ctx, &jwtSecret, metav1.UpdateOptions{}); err != nil {
+				logger.Error(err, "failed to update jwt secret")
+				return err
+			}
+		} else {
+			if _, err = r.CV1Interface.Secrets(acc.Namespace).Create(ctx, &jwtSecret, metav1.CreateOptions{}); err != nil {
+				logger.Error(err, "failed to create jwt secret")
+				return err
+			}
 		}
 
-		seedSecret := NewSecret(acc.Spec.SeedSecretName, acc.Namespace, WithData(map[string][]byte{"seed": seed}), WithImmutable(true))
+		seedData := map[string][]byte{accountsnatsiov1alpha1.NatsSecretSeedKey: seed}
+		seedSecret := NewSecret(acc.Spec.SeedSecretName, acc.Namespace, WithData(seedData), WithImmutable(true))
 		if err := ctrl.SetControllerReference(acc, &seedSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set account as owner of seed secret")
 			return err
 		}
-		if _, err = r.CV1Interface.Secrets(acc.Namespace).Create(ctx, &seedSecret, metav1.CreateOptions{}); err != nil {
-			logger.Error(err, "failed to create seed secret")
-			return err
+
+		if errSeed != nil {
+			// seed secret already exists so Update instead of Create
+			if _, err = r.CV1Interface.Secrets(acc.Namespace).Update(ctx, &seedSecret, metav1.UpdateOptions{}); err != nil {
+				logger.Error(err, "failed to update seed secret")
+				return err
+			}
+		} else {
+			if _, err = r.CV1Interface.Secrets(acc.Namespace).Create(ctx, &seedSecret, metav1.CreateOptions{}); err != nil {
+				logger.Error(err, "failed to create seed secret")
+				return err
+			}
 		}
 
 		err = r.NatsClient.PushAccountJWT(ctx, ajwt)
@@ -282,27 +300,14 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 		logger.Error(errJWT, "failed to get jwt secret")
 		return errJWT
 	} else {
-		// TODO @JoeLanglands YOU NEED TO Check whether the jwt needs updating with new signing keys. You CANNOT update it every reconcile
-		// because the secrets are updated of which the account owns therefore triggerening a cascade of reconciliations.  Used acc.Status.IsReady()
-		// here to simulate it not needing updating.
-		if !acc.Status.IsReady() {
-			err := r.updateAccountJWTSigningKeys(ctx, opSkey, jwtSec, sKeysPublicKeys)
-			if err != nil {
-				logger.V(1).Info("failed to update account JWT with signing keys", "error", err)
-				acc.Status.MarkJWTPushUnknown("failed to update account JWT with signing keys", "")
-				acc.Status.MarkJWTSecretUnknown("failed to update account JWT with signing keys", "")
-				return nil
-			}
-
+		err := r.updateAccountJWTSigningKeys(ctx, opSkey, jwtSec, sKeysPublicKeys)
+		if err != nil {
+			logger.V(1).Info("failed to update account JWT with signing keys", "error", err)
+			acc.Status.MarkJWTPushUnknown("failed to update account JWT with signing keys", "")
+			acc.Status.MarkJWTSecretUnknown("failed to update account JWT with signing keys", "")
+			return nil
 		}
 	}
-
-	// TODO @JoeLanglands Do I even need to do these?
-	// acc.Status.MarkJWTPushed()
-	// // TODO @JoeLanglands - Don't use acc.Status here I think. It can cause a panic but this bit seems unclear
-	// // also its self-referential with the fields being passed/set which is just stupid by me
-	// acc.Status.MarkSeedSecretReady(acc.Status.KeyPair.PublicKey, acc.Status.KeyPair.SeedSecretName)
-	// acc.Status.MarkJWTSecretReady()
 
 	return nil
 }
@@ -310,11 +315,16 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string) error {
 	logger := log.FromContext(ctx)
 
-	accJWTEncoded := string(jwtSecret.Data["jwt"])
+	accJWTEncoded := string(jwtSecret.Data[accountsnatsiov1alpha1.NatsSecretJWTKey])
 	accClaims, err := jwt.DecodeAccountClaims(accJWTEncoded)
 	if err != nil {
 		logger.Error(err, "failed to decode account jwt")
 		return err
+	}
+
+	if isEqualUnordered(accClaims.SigningKeys, sKeys) {
+		logger.V(1).Info("account jwt signing keys are already up to date")
+		return nil
 	}
 
 	accClaims.SigningKeys = jwt.StringList(sKeys)
@@ -331,7 +341,7 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, ope
 		return err
 	}
 
-	jwtSecret.Data["jwt"] = []byte(ajwt)
+	jwtSecret.Data[accountsnatsiov1alpha1.NatsSecretJWTKey] = []byte(ajwt)
 	_, err = r.CV1Interface.Secrets(jwtSecret.Namespace).Update(ctx, jwtSecret, metav1.UpdateOptions{})
 	if err != nil {
 		logger.Error(err, "failed to update jwt secret")
@@ -346,6 +356,19 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, ope
 
 	return nil
 }
+
+// createOrUpdateSecret will create or update a secret depdning on the update flag.
+// TODO @JoeLanglands need to use this function above instead of the horrible code in the ensureJWTSecret function
+// also consider moving this function to utils and pass the CV1Interface as a parameter instead because there is a similar function in user_controller
+// func (r *AccountReconciler) createOrUpdateSecret(ctx context.Context, namespace string, secret *v1.Secret, update bool) error {
+// 	var err error
+// 	if update {
+// 		_, err = r.CV1Interface.Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
+// 	} else {
+// 		_, err = r.CV1Interface.Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+// 	}
+// 	return err
+// }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {

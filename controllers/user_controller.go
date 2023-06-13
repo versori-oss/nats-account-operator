@@ -140,17 +140,17 @@ func (r *UserReconciler) ensureAccountResolved(ctx context.Context, usr *account
 		return []byte{}, err
 	}
 
-	return skSeedSecret.Data["seed"], nil
+	return skSeedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey], nil
 }
 
 func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsnatsiov1alpha1.User, accSKey []byte) error {
 	logger := log.FromContext(ctx)
 
-	sSec, errSeed := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.SeedSecretName, metav1.GetOptions{})
+	_, errSeed := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.SeedSecretName, metav1.GetOptions{})
 	_, errJWT := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.JWTSecretName, metav1.GetOptions{})
 	_, errCreds := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.CredentialsSecretName, metav1.GetOptions{})
 	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) || errors.IsNotFound(errCreds) {
-		// one or the other is not found, so re-create them all
+		// one or the other is not found, so re-create the creds, seed and jwt and then update/create the secrets
 
 		kPair, err := nkeys.FromSeed(accSKey)
 		if err != nil {
@@ -170,47 +170,59 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 			return err
 		}
 
-		jwtSecret := NewSecret(usr.Spec.JWTSecretName, usr.Namespace, WithData(map[string][]byte{"jwt": []byte(ujwt)}), WithImmutable(true))
-		if _, err = r.CV1Interface.Secrets(usr.Namespace).Create(ctx, &jwtSecret, metav1.CreateOptions{}); err != nil {
-			logger.Error(err, "failed to create jwt secret")
-			return err
-		}
-
-		if err = ctrl.SetControllerReference(usr, &jwtSecret, r.Scheme); err != nil {
-			logger.Error(err, "failed to set user as owner of jwt secret")
-			return err
-		}
-
-		seedSecret := NewSecret(usr.Spec.SeedSecretName, usr.Namespace, WithData(map[string][]byte{"seed": seed, "publicKey": []byte(publicKey)}), WithImmutable(true))
-		if _, err := r.CV1Interface.Secrets(usr.Namespace).Create(ctx, &seedSecret, metav1.CreateOptions{}); err != nil {
-			logger.Error(err, "failed to create seed secret")
-			return err
-		}
-
-		if err = ctrl.SetControllerReference(usr, &seedSecret, r.Scheme); err != nil {
-			logger.Error(err, "failed to set user as owner of seed secret")
-			return err
-		}
-
 		userCreds, err := jwt.FormatUserConfig(ujwt, seed)
 		if err != nil {
 			logger.Info("failed to format user creds")
 			usr.Status.MarkCredentialsSecretFailed("failed to format user creds", "")
 			return nil
 		}
-		credsSecret := NewSecret(usr.Spec.CredentialsSecretName, usr.Namespace, WithData(map[string][]byte{"creds": []byte(userCreds)}), WithImmutable(false))
-		if _, err := r.CV1Interface.Secrets(usr.Namespace).Create(ctx, &credsSecret, metav1.CreateOptions{}); err != nil {
-			logger.Error(err, "failed to create creds secret")
+
+		// create jwt secret and update or create it on the cluster
+		jwtData := map[string][]byte{accountsnatsiov1alpha1.NatsSecretJWTKey: []byte(ujwt)}
+		jwtSecret := NewSecret(usr.Spec.JWTSecretName, usr.Namespace, WithData(jwtData), WithImmutable(true))
+		if err = ctrl.SetControllerReference(usr, &jwtSecret, r.Scheme); err != nil {
+			logger.Error(err, "failed to set user as owner of jwt secret")
 			return err
 		}
 
+		if err = r.createOrUpdateSecret(ctx, usr.Namespace, &jwtSecret, errJWT != nil); err != nil {
+			logger.Error(err, "failed to create or update jwt secret")
+			return err
+		}
+
+		// create seed secret and update or create it on the cluster
+		seedData := map[string][]byte{
+			accountsnatsiov1alpha1.NatsSecretSeedKey:      seed,
+			accountsnatsiov1alpha1.NatsSecretPublicKeyKey: []byte(publicKey),
+		}
+		seedSecret := NewSecret(usr.Spec.SeedSecretName, usr.Namespace, WithData(seedData), WithImmutable(true))
+		if err = ctrl.SetControllerReference(usr, &seedSecret, r.Scheme); err != nil {
+			logger.Error(err, "failed to set user as owner of seed secret")
+			return err
+		}
+
+		if err = r.createOrUpdateSecret(ctx, usr.Namespace, &seedSecret, errSeed != nil); err != nil {
+			logger.Error(err, "failed to create or update seed secret")
+			return err
+		}
+
+		// create creds secret and update or create it on the cluster
+		credsData := map[string][]byte{accountsnatsiov1alpha1.NatsSecretCredsKey: userCreds}
+		credsSecret := NewSecret(usr.Spec.CredentialsSecretName, usr.Namespace, WithData(credsData), WithImmutable(false))
 		if err = ctrl.SetControllerReference(usr, &credsSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set user as owner of creds secret")
 			return err
 		}
+
+		if err = r.createOrUpdateSecret(ctx, usr.Namespace, &credsSecret, errCreds != nil); err != nil {
+			logger.Error(err, "failed to create or update creds secret")
+			return err
+		}
+
 		usr.Status.MarkCredentialsSecretReady()
 		usr.Status.MarkJWTSecretReady()
 		usr.Status.MarkSeedSecretReady(publicKey, usr.Spec.SeedSecretName)
+		return nil
 	} else if errSeed != nil {
 		// going to actually return and log errors here as something could have gone genuinely wrong
 		logger.Error(errSeed, "failed to get seed secret")
@@ -226,12 +238,20 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 		return errCreds
 	}
 
-	// if we reach here they must all be there in some capacity
-	usr.Status.MarkJWTSecretReady()
-	usr.Status.MarkSeedSecretReady(string(sSec.Data["publicKey"]), usr.Spec.SeedSecretName)
-	usr.Status.MarkCredentialsSecretReady()
-
 	return nil
+}
+
+// createOrUpdateSecret will create or update a secret depending on the update flag. Pass true to update, false to create
+// TODO @JoeLanglands there is a similar function in account_controller, should I just make these one function and pass a CV1Interface?
+func (r *UserReconciler) createOrUpdateSecret(ctx context.Context, namespace string, secret *v1.Secret, update bool) error {
+	var err error
+	if update {
+		_, err = r.CV1Interface.Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
+	} else {
+		_, err = r.CV1Interface.Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+	}
+
+	return err
 }
 
 // SetupWithManager sets up the controller with the Manager.

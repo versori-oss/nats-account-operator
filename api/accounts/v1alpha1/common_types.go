@@ -13,6 +13,13 @@ const (
 	NatsSecretTypeSKey NatsSecretType = "skey"
 )
 
+const (
+	NatsSecretJWTKey       = "jwt"
+	NatsSecretCredsKey     = "nats.creds"
+	NatsSecretSeedKey      = "seed"
+	NatsSecretPublicKeyKey = "publicKey"
+)
+
 // InferredObjectReference is an object reference without the APIVersion and Kind fields. The APIVersion and Kind
 // are inferred based on where the reference is used.
 type InferredObjectReference struct {
