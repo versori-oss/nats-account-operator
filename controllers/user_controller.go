@@ -185,7 +185,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 			return err
 		}
 
-		if err = r.createOrUpdateSecret(ctx, usr.Namespace, &jwtSecret, errJWT != nil); err != nil {
+		if _, err := createOrUpdateSecret(ctx, r.CV1Interface, usr.Namespace, &jwtSecret, !errors.IsNotFound(errJWT)); err != nil {
 			logger.Error(err, "failed to create or update jwt secret")
 			return err
 		}
@@ -201,7 +201,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 			return err
 		}
 
-		if err = r.createOrUpdateSecret(ctx, usr.Namespace, &seedSecret, errSeed != nil); err != nil {
+		if _, err := createOrUpdateSecret(ctx, r.CV1Interface, usr.Namespace, &seedSecret, !errors.IsNotFound(errSeed)); err != nil {
 			logger.Error(err, "failed to create or update seed secret")
 			return err
 		}
@@ -214,7 +214,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 			return err
 		}
 
-		if err = r.createOrUpdateSecret(ctx, usr.Namespace, &credsSecret, errCreds != nil); err != nil {
+		if _, err := createOrUpdateSecret(ctx, r.CV1Interface, usr.Namespace, &credsSecret, !errors.IsNotFound(errCreds)); err != nil {
 			logger.Error(err, "failed to create or update creds secret")
 			return err
 		}
@@ -239,19 +239,6 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 	}
 
 	return nil
-}
-
-// createOrUpdateSecret will create or update a secret depending on the update flag. Pass true to update, false to create
-// TODO @JoeLanglands there is a similar function in account_controller, should I just make these one function and pass a CV1Interface?
-func (r *UserReconciler) createOrUpdateSecret(ctx context.Context, namespace string, secret *v1.Secret, update bool) error {
-	var err error
-	if update {
-		_, err = r.CV1Interface.Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
-	} else {
-		_, err = r.CV1Interface.Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
-	}
-
-	return err
 }
 
 // SetupWithManager sets up the controller with the Manager.

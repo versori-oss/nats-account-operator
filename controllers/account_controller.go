@@ -245,17 +245,9 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		if errJWT != nil {
-			// jwt secret already exists so Update instead of Create
-			if _, err = r.CV1Interface.Secrets(acc.Namespace).Update(ctx, &jwtSecret, metav1.UpdateOptions{}); err != nil {
-				logger.Error(err, "failed to update jwt secret")
-				return err
-			}
-		} else {
-			if _, err = r.CV1Interface.Secrets(acc.Namespace).Create(ctx, &jwtSecret, metav1.CreateOptions{}); err != nil {
-				logger.Error(err, "failed to create jwt secret")
-				return err
-			}
+		if _, err := createOrUpdateSecret(ctx, r.CV1Interface, acc.Namespace, &jwtSecret, !errors.IsNotFound(errJWT)); err != nil {
+			logger.Error(err, "failed to create or update jwt secret")
+			return err
 		}
 
 		seedData := map[string][]byte{accountsnatsiov1alpha1.NatsSecretSeedKey: seed}
@@ -265,17 +257,9 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		if errSeed != nil {
-			// seed secret already exists so Update instead of Create
-			if _, err = r.CV1Interface.Secrets(acc.Namespace).Update(ctx, &seedSecret, metav1.UpdateOptions{}); err != nil {
-				logger.Error(err, "failed to update seed secret")
-				return err
-			}
-		} else {
-			if _, err = r.CV1Interface.Secrets(acc.Namespace).Create(ctx, &seedSecret, metav1.CreateOptions{}); err != nil {
-				logger.Error(err, "failed to create seed secret")
-				return err
-			}
+		if _, err := createOrUpdateSecret(ctx, r.CV1Interface, acc.Namespace, &seedSecret, !errors.IsNotFound(errSeed)); err != nil {
+			logger.Error(err, "failed to create or update seed secret")
+			return err
 		}
 
 		err = r.NatsClient.PushAccountJWT(ctx, ajwt)
@@ -356,19 +340,6 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, ope
 
 	return nil
 }
-
-// createOrUpdateSecret will create or update a secret depdning on the update flag.
-// TODO @JoeLanglands need to use this function above instead of the horrible code in the ensureJWTSecret function
-// also consider moving this function to utils and pass the CV1Interface as a parameter instead because there is a similar function in user_controller
-// func (r *AccountReconciler) createOrUpdateSecret(ctx context.Context, namespace string, secret *v1.Secret, update bool) error {
-// 	var err error
-// 	if update {
-// 		_, err = r.CV1Interface.Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
-// 	} else {
-// 		_, err = r.CV1Interface.Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
-// 	}
-// 	return err
-// }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {

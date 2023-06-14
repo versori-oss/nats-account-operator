@@ -1,8 +1,11 @@
 package controllers
 
 import (
+	"context"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/utils/pointer"
 )
 
@@ -61,4 +64,18 @@ func NewSecret(name, namespace string, opts ...SecretOpt) v1.Secret {
 	}
 
 	return s
+}
+
+// createOrUpdateSecret creates or updates the given secret. Pass update=true to update an existing secret.
+// Passing false will create it. This function is to tidy up code in the controllers.
+func createOrUpdateSecret(ctx context.Context, CV1Interface corev1.CoreV1Interface, namespace string, secret *v1.Secret, update bool) (*v1.Secret, error) {
+	var err error
+	var returnedSecret *v1.Secret
+
+	if update {
+		returnedSecret, err = CV1Interface.Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
+	} else {
+		returnedSecret, err = CV1Interface.Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+	}
+	return returnedSecret, err
 }
