@@ -208,7 +208,6 @@ func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *acc
 func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accountsnatsiov1alpha1.Account, sKeys []accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, opSkey []byte) error {
 	logger := log.FromContext(ctx)
 
-	// The operator for this account must be resolved for the code to reach here
 	natsHelper := nsc.NscHelper{
 		OperatorRef:  acc.Status.OperatorRef,
 		CV1Interface: r.CV1Interface,
@@ -223,7 +222,6 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 		sKeysPublicKeys = append(sKeysPublicKeys, sk.KeyPair.PublicKey)
 	}
 
-	// if one or the other does not exist, re-create the jwt and seed then update/create the secrets
 	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) {
 		accClaims := jwt.Account{
 			Imports:     nsc.ConvertToNATSImports(acc.Spec.Imports),
@@ -269,14 +267,16 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		// TODO @JoeLanglands Only do this if the account is NOT the system account
-		if isSys, err := r.isSystemAccount(ctx, acc); err != nil && !isSys {
+		if isSys, err := r.isSystemAccount(ctx, acc); err == nil && !isSys {
 			err = natsHelper.PushJWT(ctx, ajwt)
 			if err != nil {
 				logger.Info("failed to push account jwt to nats server", "error", err)
 				acc.Status.MarkJWTPushFailed("failed to push account jwt to nats server", "error: %s", err)
 				return nil
 			}
+		} else if err == nil {
+			logger.Error(err, "failed to determine if account is system account")
+			return err
 		}
 
 		acc.Status.MarkJWTPushed()
@@ -324,7 +324,6 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc
 
 	accClaims.SigningKeys = jwt.StringList(sKeys)
 
-	//now update the secret with the new jwt and update the account jwt on NATS
 	kPair, err := nkeys.FromSeed(operatorSeed)
 	if err != nil {
 		logger.Error(err, "failed to create nkeys from operator seed")
@@ -343,8 +342,7 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc
 		return err
 	}
 
-	// TODO @JoeLanglands Only do this if the account is NOT the system account
-	if isSys, err := r.isSystemAccount(ctx, acc); err != nil && !isSys {
+	if isSys, err := r.isSystemAccount(ctx, acc); err == nil && !isSys {
 		err = natsHelper.UpdateJWT(ctx, accClaims.Subject, ajwt)
 		if err != nil {
 			logger.Error(err, "failed to update account jwt on nats server")
