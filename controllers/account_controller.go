@@ -269,11 +269,14 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		err = natsHelper.PushJWT(ctx, ajwt)
-		if err != nil {
-			logger.Info("failed to push account jwt to nats server", "error", err)
-			acc.Status.MarkJWTPushFailed("failed to push account jwt to nats server", "error: %s", err)
-			return nil
+		// TODO @JoeLanglands Only do this if the account is NOT the system account
+		if isSys, err := r.isSystemAccount(ctx, acc); err != nil && !isSys {
+			err = natsHelper.PushJWT(ctx, ajwt)
+			if err != nil {
+				logger.Info("failed to push account jwt to nats server", "error", err)
+				acc.Status.MarkJWTPushFailed("failed to push account jwt to nats server", "error: %s", err)
+				return nil
+			}
 		}
 
 		acc.Status.MarkJWTPushed()
@@ -292,7 +295,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 		return errJWT
 	} else {
 		// err := natsPusher.UpdateJWT(ctx, )
-		err := r.updateAccountJWTSigningKeys(ctx, opSkey, jwtSec, sKeysPublicKeys, &natsHelper)
+		err := r.updateAccountJWTSigningKeys(ctx, acc, opSkey, jwtSec, sKeysPublicKeys, &natsHelper)
 		if err != nil {
 			logger.V(1).Info("failed to update account JWT with signing keys", "error", err)
 			acc.Status.MarkJWTPushUnknown("failed to update account JWT with signing keys", "")
@@ -304,7 +307,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 	return nil
 }
 
-func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string, natsHelper nsc.NSCInterface) error {
+func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc *accountsnatsiov1alpha1.Account, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string, natsHelper nsc.NSCInterface) error {
 	logger := log.FromContext(ctx)
 
 	accJWTEncoded := string(jwtSecret.Data[accountsnatsiov1alpha1.NatsSecretJWTKey])
@@ -340,13 +343,43 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, ope
 		return err
 	}
 
-	err = natsHelper.UpdateJWT(ctx, accClaims.Subject, ajwt)
-	if err != nil {
-		logger.Error(err, "failed to update account jwt on nats server")
-		return err
+	// TODO @JoeLanglands Only do this if the account is NOT the system account
+	if isSys, err := r.isSystemAccount(ctx, acc); err != nil && !isSys {
+		err = natsHelper.UpdateJWT(ctx, accClaims.Subject, ajwt)
+		if err != nil {
+			logger.Error(err, "failed to update account jwt on nats server")
+			return err
+		}
 	}
 
 	return nil
+}
+
+// isSystemAccount returns true if acc is the system account this can only be used if the accounts operator has been resolved.
+func (r *AccountReconciler) isSystemAccount(ctx context.Context, acc *accountsnatsiov1alpha1.Account) (bool, error) {
+	logger := log.FromContext(ctx)
+
+	if !acc.Status.GetCondition(accountsnatsiov1alpha1.AccountConditionOperatorResolved).IsTrue() {
+		logger.V(1).Info("operator not resolved for account")
+		// just return true here because we DO NOT push when true, so essentially wait for next reconcile when operator is resolved
+		return true, nil
+	}
+	// the account is the system account if and only if the system account, in the operator CR referenced by account have the same name and namespace.
+	operator, err := r.AccountsClientSet.Operators(acc.Status.OperatorRef.Namespace).Get(ctx, acc.Status.OperatorRef.Name, metav1.GetOptions{})
+	if err != nil {
+		return true, err
+	}
+
+	if !operator.Status.GetCondition(accountsnatsiov1alpha1.OperatorConditionSystemAccountResolved).IsTrue() {
+		logger.V(1).Info("system account not yet resolved for operator")
+		return true, nil
+	}
+
+	if acc.Name == operator.Status.ResolvedSystemAccount.Name && acc.Namespace == operator.Status.ResolvedSystemAccount.Namespace {
+		return true, nil
+	}
+
+	return false, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

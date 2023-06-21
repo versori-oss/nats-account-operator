@@ -40,6 +40,7 @@ func (n *NscHelper) PushJWT(ctx context.Context, ajwt string) error {
 		return err
 	}
 
+	// TODO @JoeLanglands check this is the correct server URL
 	serverUrl := operator.Spec.AccountServerURL
 
 	accJWTSeedOpt := nats.UserJWTAndSeed(sysAccJWT, sysAccSeed)
