@@ -13,16 +13,15 @@ import (
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
-type NATSInterface interface {
+type NSCInterface interface {
 	PushJWT(ctx context.Context, ajwt string) error
 	UpdateJWT(ctx context.Context, accId string, ajwt string) error
 }
 
-var _ NATSInterface = (*NatsPusher)(nil)
+var _ NSCInterface = (*NscHelper)(nil)
 
-// NatsPusher is a struct that contains the necessary information to push JWTs to the server
-// TODO @JoeLanglands give this shit a better name
-type NatsPusher struct {
+// NscHelper is a struct that contains the necessary information to push JWTs to the server
+type NscHelper struct {
 	OperatorRef  *v1alpha1.InferredObjectReference
 	AccClientSet accountsclientsets.AccountsV1alpha1Interface
 	CV1Interface corev1.CoreV1Interface
@@ -30,7 +29,7 @@ type NatsPusher struct {
 
 // PushJWT pushes a JWT to the server. It uses the accClientSet to resolve the operator account and then the system account.
 // It then creates a NATS client using the retrieved system account credentials
-func (n *NatsPusher) PushJWT(ctx context.Context, ajwt string) error {
+func (n *NscHelper) PushJWT(ctx context.Context, ajwt string) error {
 	operator, sysAcc, err := n.getOperatorAndSysAccount(ctx)
 	if err != nil {
 		return err
@@ -60,7 +59,7 @@ func (n *NatsPusher) PushJWT(ctx context.Context, ajwt string) error {
 }
 
 // UpdateJWT updates the JWT owned by the account identified by accId. Works similarly to PushJWT.
-func (n *NatsPusher) UpdateJWT(ctx context.Context, accId string, ajwt string) error {
+func (n *NscHelper) UpdateJWT(ctx context.Context, accId string, ajwt string) error {
 	operator, sysAcc, err := n.getOperatorAndSysAccount(ctx)
 	if err != nil {
 		return err
@@ -90,7 +89,7 @@ func (n *NatsPusher) UpdateJWT(ctx context.Context, accId string, ajwt string) e
 }
 
 // getOperatorAndSysAccount retrieves the operator and system account from the cluster using the accClientSet.
-func (n *NatsPusher) getOperatorAndSysAccount(ctx context.Context) (*v1alpha1.Operator, *v1alpha1.Account, error) {
+func (n *NscHelper) getOperatorAndSysAccount(ctx context.Context) (*v1alpha1.Operator, *v1alpha1.Account, error) {
 	operator, err := n.AccClientSet.Operators(n.OperatorRef.Namespace).Get(ctx, n.OperatorRef.Name, v1.GetOptions{})
 	if err != nil {
 		return nil, nil, err
@@ -110,7 +109,7 @@ func (n *NatsPusher) getOperatorAndSysAccount(ctx context.Context) (*v1alpha1.Op
 // Also need to make sure the below function works properly
 
 // getSysAccountJWTSeed retrieves the JWT and seed for the system account. The order of the returned values are: JWT, Seed, error.
-func (n *NatsPusher) getSysAccountJWTSeed(ctx context.Context, acc *v1alpha1.Account) (jwt string, seed string, err error) {
+func (n *NscHelper) getSysAccountJWTSeed(ctx context.Context, acc *v1alpha1.Account) (jwt string, seed string, err error) {
 	jwtSecret, err := n.CV1Interface.Secrets(acc.GetNamespace()).Get(ctx, acc.Spec.JWTSecretName, v1.GetOptions{})
 	if err != nil {
 		return "", "", err

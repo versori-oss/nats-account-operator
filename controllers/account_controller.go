@@ -209,8 +209,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 	logger := log.FromContext(ctx)
 
 	// The operator for this account must be resolved for the code to reach here
-	// TODO @JoeLanglands give this shit a better name
-	natsPusher := nsc.NatsPusher{
+	natsHelper := nsc.NscHelper{
 		OperatorRef:  acc.Status.OperatorRef,
 		CV1Interface: r.CV1Interface,
 		AccClientSet: r.AccountsClientSet,
@@ -270,7 +269,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		err = natsPusher.PushJWT(ctx, ajwt)
+		err = natsHelper.PushJWT(ctx, ajwt)
 		if err != nil {
 			logger.Info("failed to push account jwt to nats server", "error", err)
 			acc.Status.MarkJWTPushFailed("failed to push account jwt to nats server", "error: %s", err)
@@ -293,7 +292,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 		return errJWT
 	} else {
 		// err := natsPusher.UpdateJWT(ctx, )
-		err := r.updateAccountJWTSigningKeys(ctx, opSkey, jwtSec, sKeysPublicKeys, &natsPusher)
+		err := r.updateAccountJWTSigningKeys(ctx, opSkey, jwtSec, sKeysPublicKeys, &natsHelper)
 		if err != nil {
 			logger.V(1).Info("failed to update account JWT with signing keys", "error", err)
 			acc.Status.MarkJWTPushUnknown("failed to update account JWT with signing keys", "")
@@ -305,7 +304,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 	return nil
 }
 
-func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string, natsPusher nsc.NATSInterface) error {
+func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string, natsHelper nsc.NSCInterface) error {
 	logger := log.FromContext(ctx)
 
 	accJWTEncoded := string(jwtSecret.Data[accountsnatsiov1alpha1.NatsSecretJWTKey])
@@ -341,7 +340,7 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, ope
 		return err
 	}
 
-	err = natsPusher.UpdateJWT(ctx, accClaims.Subject, ajwt)
+	err = natsHelper.UpdateJWT(ctx, accClaims.Subject, ajwt)
 	if err != nil {
 		logger.Error(err, "failed to update account jwt on nats server")
 		return err
