@@ -48,6 +48,7 @@ import (
 	"github.com/nats-io/nkeys"
 	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 // AccountReconciler reconciles a Account object
@@ -56,7 +57,6 @@ type AccountReconciler struct {
 	Scheme            *runtime.Scheme
 	CV1Interface      corev1.CoreV1Interface
 	AccountsClientSet accountsclientsets.AccountsV1alpha1Interface
-	NatsClient        *NatsClient
 }
 
 //+kubebuilder:rbac:groups=accounts.nats.io,resources=accounts,verbs=get;list;watch;create;update;patch;delete
@@ -208,6 +208,14 @@ func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *acc
 func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accountsnatsiov1alpha1.Account, sKeys []accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, opSkey []byte) error {
 	logger := log.FromContext(ctx)
 
+	// The operator for this account must be resolved for the code to reach here
+	// TODO @JoeLanglands give this shit a better name
+	natsPusher := nsc.NatsPusher{
+		OperatorRef:  acc.Status.OperatorRef,
+		CV1Interface: r.CV1Interface,
+		AccClientSet: r.AccountsClientSet,
+	}
+
 	_, errSeed := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, acc.Spec.SeedSecretName, metav1.GetOptions{})
 	jwtSec, errJWT := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, acc.Spec.JWTSecretName, metav1.GetOptions{})
 
@@ -219,10 +227,10 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 	// if one or the other does not exist, re-create the jwt and seed then update/create the secrets
 	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) {
 		accClaims := jwt.Account{
-			Imports:     convertToNATSImports(acc.Spec.Imports),
-			Exports:     convertToNATSExports(acc.Spec.Exports),
-			Identities:  convertToNATSIdentities(acc.Spec.Identities),
-			Limits:      convertToNATSOperatorLimits(acc.Spec.Limits),
+			Imports:     nsc.ConvertToNATSImports(acc.Spec.Imports),
+			Exports:     nsc.ConvertToNATSExports(acc.Spec.Exports),
+			Identities:  nsc.ConvertToNATSIdentities(acc.Spec.Identities),
+			Limits:      nsc.ConvertToNATSOperatorLimits(acc.Spec.Limits),
 			SigningKeys: sKeysPublicKeys,
 		}
 
@@ -232,7 +240,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		ajwt, publicKey, seed, err := CreateAccount(acc.Name, accClaims, kPair)
+		ajwt, publicKey, seed, err := nsc.CreateAccount(acc.Name, accClaims, kPair)
 		if err != nil {
 			logger.Error(err, "failed to create account")
 			return err
@@ -262,7 +270,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		err = r.NatsClient.PushAccountJWT(ctx, ajwt)
+		err = natsPusher.PushJWT(ctx, ajwt)
 		if err != nil {
 			logger.Info("failed to push account jwt to nats server", "error", err)
 			acc.Status.MarkJWTPushFailed("failed to push account jwt to nats server", "error: %s", err)
@@ -284,7 +292,8 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 		logger.Error(errJWT, "failed to get jwt secret")
 		return errJWT
 	} else {
-		err := r.updateAccountJWTSigningKeys(ctx, opSkey, jwtSec, sKeysPublicKeys)
+		// err := natsPusher.UpdateJWT(ctx, )
+		err := r.updateAccountJWTSigningKeys(ctx, opSkey, jwtSec, sKeysPublicKeys, &natsPusher)
 		if err != nil {
 			logger.V(1).Info("failed to update account JWT with signing keys", "error", err)
 			acc.Status.MarkJWTPushUnknown("failed to update account JWT with signing keys", "")
@@ -296,7 +305,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 	return nil
 }
 
-func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string) error {
+func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string, natsPusher nsc.NATSInterface) error {
 	logger := log.FromContext(ctx)
 
 	accJWTEncoded := string(jwtSecret.Data[accountsnatsiov1alpha1.NatsSecretJWTKey])
@@ -332,7 +341,7 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, ope
 		return err
 	}
 
-	err = r.NatsClient.UpdateAccountJWT(ctx, accClaims.Subject, ajwt)
+	err = natsPusher.UpdateJWT(ctx, accClaims.Subject, ajwt)
 	if err != nil {
 		logger.Error(err, "failed to update account jwt on nats server")
 		return err

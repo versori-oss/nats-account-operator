@@ -43,6 +43,7 @@ import (
 	"github.com/nats-io/nkeys"
 	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 // UserReconciler reconciles a User object
@@ -159,12 +160,12 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 		}
 
 		usrClaims := jwt.User{
-			Permissions: convertToNATSUserPermissions(usr.Spec.Permissions),
-			Limits:      convertToNATSLimits(usr.Spec.Limits),
+			Permissions: nsc.ConvertToNATSUserPermissions(usr.Spec.Permissions),
+			Limits:      nsc.ConvertToNATSLimits(usr.Spec.Limits),
 			BearerToken: usr.Spec.BearerToken,
 		}
 
-		ujwt, publicKey, seed, err := CreateUser(usr.Name, usrClaims, kPair)
+		ujwt, publicKey, seed, err := nsc.CreateUser(usr.Name, usrClaims, kPair)
 		if err != nil {
 			logger.Error(err, "failed to create user jwt")
 			return err

@@ -49,6 +49,7 @@ import (
 	"github.com/nats-io/nkeys"
 	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 // OperatorReconciler reconciles a Operator object
@@ -57,7 +58,6 @@ type OperatorReconciler struct {
 	Scheme            *runtime.Scheme
 	CV1Interface      corev1.CoreV1Interface
 	AccountsClientSet accountsclientsets.AccountsV1alpha1Interface
-	NatsClient        *NatsClient
 }
 
 //+kubebuilder:rbac:groups=accounts.nats.io,resources=operators,verbs=get;list;watch;create;update;patch;delete
@@ -220,7 +220,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 	jwtSec, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		op := jwt.Operator{
-			Identities:          convertToNATSIdentities(operator.Spec.Identities),
+			Identities:          nsc.ConvertToNATSIdentities(operator.Spec.Identities),
 			SigningKeys:         sKeysPublicKeys,
 			AccountServerURL:    operator.Spec.AccountServerURL,
 			OperatorServiceURLs: operator.Spec.OperatorServiceURLs,

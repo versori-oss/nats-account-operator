@@ -1,4 +1,4 @@
-package controllers
+package nsc
 
 import (
 	"context"
@@ -26,6 +26,8 @@ type ErrAccountJWTNotPushed struct {
 }
 
 func (e *ErrAccountJWTNotPushed) Error() string { return e.msg }
+
+// I'm going to leave the types and functions in this file to be exported for now.
 
 type NatsClient struct {
 	conn *nats.Conn
@@ -64,6 +66,10 @@ func (n *NatsClient) UpdateAccountJWT(ctx context.Context, accountID, ajwt strin
 		return err
 	}
 	return nil
+}
+
+func (n *NatsClient) Close() {
+	n.conn.Close()
 }
 
 func checkReplyForError(msg []byte) error {

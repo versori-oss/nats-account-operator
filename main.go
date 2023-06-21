@@ -42,7 +42,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/nats-io/nats.go"
 	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/controllers"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned"
@@ -106,22 +105,12 @@ func main() {
 	clientSet := kubernetes.NewForConfigOrDie(cfg)
 	accountsClientSet := accountsclientsets.NewForConfigOrDie(cfg)
 
-	// TODO @JoeLanglands this is going to have to get the cluster system account creds. Also need to make sure the URL is correct
-	creds := nats.UserCredentials("/Users/joelanglands/.local/share/nats/nsc/keys/creds/local-operator/SYS/sys.creds")
-	nc, err := nats.Connect(nats.DefaultURL, creds)
-	if err != nil {
-		setupLog.Error(err, "unable to connect to nats")
-		os.Exit(1)
-	}
-	natsClient := controllers.NewNatsClient(nc)
-
 	clientSet.AuthorizationV1()
 	if err = (&controllers.OperatorReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
 		CV1Interface:      clientSet.CoreV1(),
 		AccountsClientSet: accountsClientSet.AccountsV1alpha1(),
-		NatsClient:        natsClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Operator")
 		os.Exit(1)
@@ -131,7 +120,6 @@ func main() {
 		Scheme:            mgr.GetScheme(),
 		CV1Interface:      clientSet.CoreV1(),
 		AccountsClientSet: accountsClientSet.AccountsV1alpha1(),
-		NatsClient:        natsClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Account")
 		os.Exit(1)

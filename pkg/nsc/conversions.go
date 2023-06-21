@@ -1,4 +1,4 @@
-package controllers
+package nsc
 
 import (
 	"time"
@@ -7,7 +7,7 @@ import (
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 
-func convertToNATSOperatorLimits(limits v1alpha1.AccountLimits) jwt.OperatorLimits {
+func ConvertToNATSOperatorLimits(limits v1alpha1.AccountLimits) jwt.OperatorLimits {
 	return jwt.OperatorLimits{
 		Subs:            int64(limits.Subs),
 		Conn:            int64(limits.Conn),
@@ -20,7 +20,7 @@ func convertToNATSOperatorLimits(limits v1alpha1.AccountLimits) jwt.OperatorLimi
 	}
 }
 
-func convertTimeRanges(times []v1alpha1.StartEndTime) []jwt.TimeRange {
+func ConvertTimeRanges(times []v1alpha1.StartEndTime) []jwt.TimeRange {
 	result := make([]jwt.TimeRange, len(times))
 	for _, t := range times {
 		result = append(result, jwt.TimeRange{
@@ -31,16 +31,16 @@ func convertTimeRanges(times []v1alpha1.StartEndTime) []jwt.TimeRange {
 	return result
 }
 
-func convertToNATSLimits(limits v1alpha1.UserLimits) jwt.Limits {
+func ConvertToNATSLimits(limits v1alpha1.UserLimits) jwt.Limits {
 	return jwt.Limits{
 		Max:     int64(limits.Max),
 		Payload: int64(limits.Payload),
 		Src:     limits.Src,
-		Times:   convertTimeRanges(limits.Times),
+		Times:   ConvertTimeRanges(limits.Times),
 	}
 }
 
-func convertToNATSExportType(ieType v1alpha1.ImportExportType) jwt.ExportType {
+func ConvertToNATSExportType(ieType v1alpha1.ImportExportType) jwt.ExportType {
 	switch ieType {
 	case v1alpha1.ImportExportTypeStream:
 		return jwt.Stream
@@ -51,14 +51,14 @@ func convertToNATSExportType(ieType v1alpha1.ImportExportType) jwt.ExportType {
 	}
 }
 
-func convertToNATSServiceLatency(latency v1alpha1.AccountServiceLatency) *jwt.ServiceLatency {
+func ConvertToNATSServiceLatency(latency v1alpha1.AccountServiceLatency) *jwt.ServiceLatency {
 	return &jwt.ServiceLatency{
 		Sampling: latency.Sampling,
 		Results:  jwt.Subject(latency.Results),
 	}
 }
 
-func convertToNATSImports(imports []v1alpha1.AccountImport) jwt.Imports {
+func ConvertToNATSImports(imports []v1alpha1.AccountImport) jwt.Imports {
 	var result jwt.Imports
 	tmp := make([]*jwt.Import, len(imports))
 
@@ -69,7 +69,7 @@ func convertToNATSImports(imports []v1alpha1.AccountImport) jwt.Imports {
 			Account: i.Account,
 			Token:   i.Token,
 			To:      jwt.Subject(i.To),
-			Type:    convertToNATSExportType(i.Type),
+			Type:    ConvertToNATSExportType(i.Type),
 		}
 	}
 
@@ -77,7 +77,7 @@ func convertToNATSImports(imports []v1alpha1.AccountImport) jwt.Imports {
 	return result
 }
 
-func convertToNATSExports(exports []v1alpha1.AccountExport) jwt.Exports {
+func ConvertToNATSExports(exports []v1alpha1.AccountExport) jwt.Exports {
 	var result jwt.Exports
 	tmp := make([]*jwt.Export, len(exports))
 
@@ -85,10 +85,10 @@ func convertToNATSExports(exports []v1alpha1.AccountExport) jwt.Exports {
 		tmp[n] = &jwt.Export{
 			Name:                 export.Name,
 			Subject:              jwt.Subject(export.Subject),
-			Type:                 convertToNATSExportType(export.Type),
+			Type:                 ConvertToNATSExportType(export.Type),
 			TokenReq:             export.TokenReq,
 			ResponseType:         jwt.ResponseType(export.ResponseType),
-			Latency:              convertToNATSServiceLatency(*export.ServiceLatency),
+			Latency:              ConvertToNATSServiceLatency(*export.ServiceLatency),
 			AccountTokenPosition: export.AccountTokenPosition,
 		}
 	}
@@ -97,7 +97,7 @@ func convertToNATSExports(exports []v1alpha1.AccountExport) jwt.Exports {
 	return result
 }
 
-func convertToNATSIdentities(idents []v1alpha1.Identity) []jwt.Identity {
+func ConvertToNATSIdentities(idents []v1alpha1.Identity) []jwt.Identity {
 	result := make([]jwt.Identity, len(idents))
 	for n, ident := range idents {
 		result[n] = jwt.Identity{
@@ -108,7 +108,7 @@ func convertToNATSIdentities(idents []v1alpha1.Identity) []jwt.Identity {
 	return result
 }
 
-func convertToNATSUserPermissions(permissions v1alpha1.UserPermissions) jwt.Permissions {
+func ConvertToNATSUserPermissions(permissions v1alpha1.UserPermissions) jwt.Permissions {
 	return jwt.Permissions{
 		Pub: jwt.Permission{
 			Allow: permissions.Pub.Allow,
