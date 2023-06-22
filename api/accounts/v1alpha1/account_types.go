@@ -95,7 +95,7 @@ type AccountImport struct {
 type AccountExport struct {
 	Name    string `json:"name"`
 	Subject string `json:"subject"`
-	// Type is the type of export. This must be one of stream or service.
+	// Type is the type of export. This must be one of "stream" or "service".
 	Type     ImportExportType `json:"type"`
 	TokenReq bool             `json:"tokenReq"`
 	// ResponseType is the type of response that will be sent to the requestor. This must be one of

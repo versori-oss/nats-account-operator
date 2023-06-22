@@ -44,6 +44,10 @@ spec:
                     name:
                       type: string
                     responseType:
+                      description: ResponseType is the type of response that will
+                        be sent to the requestor. This must be one of "singleton",
+                        "stream" or "chunked" if Type is "service". If Type is "stream",
+                        this must be left as an empty string.
                       type: string
                     serviceLatency:
                       properties:
@@ -60,6 +64,8 @@ spec:
                     tokenReq:
                       type: boolean
                     type:
+                      description: Type is the type of export. This must be one of
+                        "stream" or "service".
                       type: string
                   required:
                   - accountTokenPosition
