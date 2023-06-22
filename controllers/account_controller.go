@@ -274,7 +274,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 				acc.Status.MarkJWTPushFailed("failed to push account jwt to nats server", "error: %s", err)
 				return nil
 			}
-		} else if err == nil {
+		} else if err != nil {
 			logger.Error(err, "failed to determine if account is system account")
 			return err
 		}
