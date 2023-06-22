@@ -2,7 +2,6 @@ package nsc
 
 import (
 	"time"
-	"unicode"
 
 	"github.com/nats-io/jwt"
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
@@ -42,8 +41,7 @@ func ConvertToNATSLimits(limits v1alpha1.UserLimits) jwt.Limits {
 }
 
 func ConvertToNATSExportType(ieType v1alpha1.ImportExportType) jwt.ExportType {
-	ieTypeCapitalized := capitalizeIEType(ieType)
-	switch ieTypeCapitalized {
+	switch ieType {
 	case v1alpha1.ImportExportTypeStream:
 		return jwt.Stream
 	case v1alpha1.ImportExportTypeService:
@@ -93,7 +91,7 @@ func ConvertToNATSExports(exports []v1alpha1.AccountExport) jwt.Exports {
 			Subject:              jwt.Subject(export.Subject),
 			Type:                 ConvertToNATSExportType(export.Type),
 			TokenReq:             export.TokenReq,
-			ResponseType:         jwt.ResponseType(export.ResponseType),
+			ResponseType:         ConvertToNATSResponseType(export.ResponseType),
 			Latency:              ConvertToNATSServiceLatency(export.ServiceLatency),
 			AccountTokenPosition: export.AccountTokenPosition,
 		}
@@ -101,6 +99,19 @@ func ConvertToNATSExports(exports []v1alpha1.AccountExport) jwt.Exports {
 
 	result.Add(tmp...)
 	return result
+}
+
+func ConvertToNATSResponseType(responseType v1alpha1.ResponseType) jwt.ResponseType {
+	switch responseType {
+	case v1alpha1.ResponseTypeSingleton:
+		return jwt.ResponseTypeSingleton
+	case v1alpha1.ResponseTypeStream:
+		return jwt.ResponseTypeStream
+	case v1alpha1.ResponseTypeChunked:
+		return jwt.ResponseTypeChunked
+	default:
+		return ""
+	}
 }
 
 func ConvertToNATSIdentities(idents []v1alpha1.Identity) []jwt.Identity {
@@ -129,10 +140,4 @@ func ConvertToNATSUserPermissions(permissions v1alpha1.UserPermissions) jwt.Perm
 			Expires: time.Duration(permissions.Resp.TTL) * time.Second,
 		},
 	}
-}
-
-func capitalizeIEType(ieType v1alpha1.ImportExportType) v1alpha1.ImportExportType {
-	tmp := []rune(string(ieType))
-	tmp[0] = unicode.ToUpper(tmp[0])
-	return v1alpha1.ImportExportType(tmp)
 }

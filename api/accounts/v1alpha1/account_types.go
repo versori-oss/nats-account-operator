@@ -33,16 +33,16 @@ import (
 type ImportExportType string
 
 const (
-	ImportExportTypeStream  ImportExportType = "Stream"
-	ImportExportTypeService ImportExportType = "Service"
+	ImportExportTypeStream  ImportExportType = "stream"
+	ImportExportTypeService ImportExportType = "service"
 )
 
 type ResponseType string
 
 const (
-	ResponseTypeSingleton ResponseType = "Singleton"
-	ResponseTypeStream    ResponseType = "Stream"
-	ResponseTypeChunked   ResponseType = "Chunked"
+	ResponseTypeSingleton ResponseType = "singleton"
+	ResponseTypeStream    ResponseType = "stream"
+	ResponseTypeChunked   ResponseType = "chunked"
 )
 
 // AccountSpec defines the desired state of Account
@@ -93,10 +93,13 @@ type AccountImport struct {
 }
 
 type AccountExport struct {
-	Name                 string                 `json:"name"`
-	Subject              string                 `json:"subject"`
-	Type                 ImportExportType       `json:"type"`
-	TokenReq             bool                   `json:"tokenReq"`
+	Name    string `json:"name"`
+	Subject string `json:"subject"`
+	// Type is the type of export. This must be one of stream or service.
+	Type     ImportExportType `json:"type"`
+	TokenReq bool             `json:"tokenReq"`
+	// ResponseType is the type of response that will be sent to the requestor. This must be one of
+	// "singleton", "stream" or "chunked" if Type is "service". If Type is "stream", this must be left as an empty string.
 	ResponseType         ResponseType           `json:"responseType"`
 	ServiceLatency       *AccountServiceLatency `json:"serviceLatency,omitempty"`
 	AccountTokenPosition uint                   `json:"accountTokenPosition"`
