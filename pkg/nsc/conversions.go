@@ -2,6 +2,7 @@ package nsc
 
 import (
 	"time"
+	"unicode"
 
 	"github.com/nats-io/jwt"
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
@@ -41,7 +42,8 @@ func ConvertToNATSLimits(limits v1alpha1.UserLimits) jwt.Limits {
 }
 
 func ConvertToNATSExportType(ieType v1alpha1.ImportExportType) jwt.ExportType {
-	switch ieType {
+	ieTypeCapitalized := capitalizeIEType(ieType)
+	switch ieTypeCapitalized {
 	case v1alpha1.ImportExportTypeStream:
 		return jwt.Stream
 	case v1alpha1.ImportExportTypeService:
@@ -51,7 +53,11 @@ func ConvertToNATSExportType(ieType v1alpha1.ImportExportType) jwt.ExportType {
 	}
 }
 
-func ConvertToNATSServiceLatency(latency v1alpha1.AccountServiceLatency) *jwt.ServiceLatency {
+func ConvertToNATSServiceLatency(latency *v1alpha1.AccountServiceLatency) *jwt.ServiceLatency {
+	// this field is optional so could potentially be nil
+	if latency == nil {
+		return nil
+	}
 	return &jwt.ServiceLatency{
 		Sampling: latency.Sampling,
 		Results:  jwt.Subject(latency.Results),
@@ -88,7 +94,7 @@ func ConvertToNATSExports(exports []v1alpha1.AccountExport) jwt.Exports {
 			Type:                 ConvertToNATSExportType(export.Type),
 			TokenReq:             export.TokenReq,
 			ResponseType:         jwt.ResponseType(export.ResponseType),
-			Latency:              ConvertToNATSServiceLatency(*export.ServiceLatency),
+			Latency:              ConvertToNATSServiceLatency(export.ServiceLatency),
 			AccountTokenPosition: export.AccountTokenPosition,
 		}
 	}
@@ -123,4 +129,10 @@ func ConvertToNATSUserPermissions(permissions v1alpha1.UserPermissions) jwt.Perm
 			Expires: time.Duration(permissions.Resp.TTL) * time.Second,
 		},
 	}
+}
+
+func capitalizeIEType(ieType v1alpha1.ImportExportType) v1alpha1.ImportExportType {
+	tmp := []rune(string(ieType))
+	tmp[0] = unicode.ToUpper(tmp[0])
+	return v1alpha1.ImportExportType(tmp)
 }
