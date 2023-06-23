@@ -1,10 +1,12 @@
 package nsc
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
+	"k8s.io/apimachinery/pkg/api/errors"
 )
 
 type ClaimOption func(cd *jwt.ClaimsData) error
@@ -16,7 +18,7 @@ func ExpiresAt(t time.Time) ClaimOption {
 	}
 }
 
-func CreateUser(name string, payload jwt.User, signingKey nkeys.KeyPair, opts ...ClaimOption) (ujwt string, pubKey string, seed []byte, err error) {
+func CreateUser(name string, payload jwt.User, signingKey nkeys.KeyPair, accPublicKey string, opts ...ClaimOption) (ujwt string, pubKey string, seed []byte, err error) {
 	kp, err := nkeys.CreateUser()
 	if err != nil {
 		return "", "", nil, err
@@ -37,10 +39,7 @@ func CreateUser(name string, payload jwt.User, signingKey nkeys.KeyPair, opts ..
 	claims.User = payload
 	claims.Name = name
 
-	claims.IssuerAccount, err = signingKey.PublicKey()
-	if err != nil {
-		return "", "", nil, err
-	}
+	claims.IssuerAccount = accPublicKey
 
 	for _, fn := range opts {
 		if err = fn(&claims.ClaimsData); err != nil {
@@ -51,6 +50,14 @@ func CreateUser(name string, payload jwt.User, signingKey nkeys.KeyPair, opts ..
 	ujwt, err = claims.Encode(signingKey)
 	if err != nil {
 		return "", "", nil, err
+	}
+
+	vr := jwt.CreateValidationResults()
+
+	claims.Validate(vr)
+
+	if vr.IsBlocking(true) {
+		return "", "", nil, errors.NewBadRequest(fmt.Sprintf("invalid user claims for user %s, blocking errors: %v", name, vr.Errors()))
 	}
 
 	return ujwt, pubKey, seed, nil
@@ -85,6 +92,14 @@ func CreateAccount(name string, payload jwt.Account, signingKey nkeys.KeyPair, o
 	ajwt, err = claims.Encode(signingKey)
 	if err != nil {
 		return "", "", nil, err
+	}
+
+	vr := jwt.CreateValidationResults()
+
+	claims.Validate(vr)
+
+	if vr.IsBlocking(true) {
+		return "", "", nil, errors.NewBadRequest(fmt.Sprintf("invalid account claims for account %s, blocking errors: %v", name, vr.Errors()))
 	}
 
 	return ajwt, pubKey, seed, nil
