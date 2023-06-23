@@ -4,13 +4,14 @@ package nsc
 
 import (
 	"context"
-	"errors"
 
+	natsjwt "github.com/nats-io/jwt"
 	"github.com/nats-io/nats.go"
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type NSCInterface interface {
@@ -30,21 +31,24 @@ type NscHelper struct {
 // PushJWT pushes a JWT to the server. It uses the accClientSet to resolve the operator account and then the system account.
 // It then creates a NATS client using the retrieved system account credentials
 func (n *NscHelper) PushJWT(ctx context.Context, ajwt string) error {
+	logger := log.FromContext(ctx)
+
 	operator, sysAcc, err := n.getOperatorAndSysAccount(ctx)
 	if err != nil {
 		return err
 	}
 
-	sysAccJWT, sysAccSeed, err := n.getSysAccountJWTSeed(ctx, sysAcc)
+	sysUsrJWT, sysUsrSeed, err := n.getSysUsrJWTSeed(ctx, sysAcc)
 	if err != nil {
+		logger.Error(err, "failed to get system user JWT and seed")
 		return err
 	}
 
-	// TODO @JoeLanglands check this is the correct server URL
+	//TODO @JoeLanglands I think the iss field in the system user claims in the JWT is wrong. I think iss should be the sys account public key whilst the issuer_account is fine to be the signing key's public key
+
 	serverUrl := operator.Spec.AccountServerURL
 
-	accJWTSeedOpt := nats.UserJWTAndSeed(sysAccJWT, sysAccSeed)
-	nc, err := nats.Connect(serverUrl, accJWTSeedOpt)
+	nc, err := nats.Connect(serverUrl, nats.UserJWTAndSeed(sysUsrJWT, sysUsrSeed))
 	if err != nil {
 		return err
 	}
@@ -61,20 +65,22 @@ func (n *NscHelper) PushJWT(ctx context.Context, ajwt string) error {
 
 // UpdateJWT updates the JWT owned by the account identified by accId. Works similarly to PushJWT.
 func (n *NscHelper) UpdateJWT(ctx context.Context, accId string, ajwt string) error {
+	logger := log.FromContext(ctx)
+
 	operator, sysAcc, err := n.getOperatorAndSysAccount(ctx)
 	if err != nil {
 		return err
 	}
 
-	sysAccJWT, sysAccSeed, err := n.getSysAccountJWTSeed(ctx, sysAcc)
+	sysUsrJWT, sysUsrSeed, err := n.getSysUsrJWTSeed(ctx, sysAcc)
 	if err != nil {
+		logger.Error(err, "failed to get system user JWT and seed")
 		return err
 	}
 
 	serverUrl := operator.Spec.AccountServerURL
 
-	accJWTSeedOpt := nats.UserJWTAndSeed(sysAccJWT, sysAccSeed)
-	nc, err := nats.Connect(serverUrl, accJWTSeedOpt)
+	nc, err := nats.Connect(serverUrl, nats.UserJWTAndSeed(sysUsrJWT, sysUsrSeed))
 	if err != nil {
 		return err
 	}
@@ -104,60 +110,42 @@ func (n *NscHelper) getOperatorAndSysAccount(ctx context.Context) (*v1alpha1.Ope
 	return operator, sysAcc, nil
 }
 
-// TODO @JoeLanglands Is this all even possible? Because I'm not sure if the jwt's will exist on creation. Sure the operator/sys account will
-// resolve ok but are the JWT's there? Mainly in the case where the account here IS the system account. Just gonna continue writing it and then
-// will tackle that problem when I get to it. Maybe you have to bootstrap the cluster with system account/operator secrets idk.
-// Also need to make sure the below function works properly
-
-// getSysAccountJWTSeed retrieves the JWT and seed for the system account. The order of the returned values are: JWT, Seed, error.
-func (n *NscHelper) getSysAccountJWTSeed(ctx context.Context, acc *v1alpha1.Account) (jwt string, seed string, err error) {
-	jwtSecret, err := n.CV1Interface.Secrets(acc.GetNamespace()).Get(ctx, acc.Spec.JWTSecretName, v1.GetOptions{})
-	if err != nil {
-		return "", "", err
-	}
-	seedSecret, err := n.CV1Interface.Secrets(acc.GetNamespace()).Get(ctx, acc.Spec.SeedSecretName, v1.GetOptions{})
+// getSysUsrJWTSeed retrieves the JWT and seed for a/the system account's user. The order of the returned values are: JWT, Seed, error.
+func (n *NscHelper) getSysUsrJWTSeed(ctx context.Context, sysAcc *v1alpha1.Account) (jwt string, seed string, err error) {
+	usrList, err := n.AccClientSet.Users(sysAcc.GetNamespace()).List(ctx, v1.ListOptions{})
 	if err != nil {
 		return "", "", err
 	}
 
-	seedBytes, ok := seedSecret.Data[v1alpha1.NatsSecretSeedKey]
-	if !ok {
-		return "", "", errors.New("seed secret does not contain seed key")
+	var sysUsr *v1alpha1.User
+	for _, usr := range usrList.Items {
+		if usr.Status.IsReady() && usr.Status.AccountRef.Name == sysAcc.GetName() {
+			sysUsr = &usr
+			break
+		}
 	}
 
-	jwtBytes, ok := jwtSecret.Data[v1alpha1.NatsSecretJWTKey]
-	if !ok {
-		return "", "", errors.New("jwt secret does not contain jwt key")
+	usrCredSecret, err := n.CV1Interface.Secrets(sysUsr.GetNamespace()).Get(ctx, sysUsr.Spec.CredentialsSecretName, v1.GetOptions{})
+	if err != nil {
+		return "", "", err
 	}
 
-	return string(jwtBytes), string(seedBytes), err
+	usrCredentials := usrCredSecret.Data[v1alpha1.NatsSecretCredsKey]
+
+	ujwt, err := natsjwt.ParseDecoratedJWT(usrCredentials)
+	if err != nil {
+		return "", "", err
+	}
+
+	seedKPair, err := natsjwt.ParseDecoratedUserNKey(usrCredentials)
+	if err != nil {
+		return "", "", err
+	}
+
+	seedBytes, err := seedKPair.Seed()
+	if err != nil {
+		return "", "", err
+	}
+
+	return ujwt, string(seedBytes), err
 }
-
-// TODO @JoeLanglands I know you attempted to make this nice and generic to work with accounts and operators but it might only need to deal with Accounts.
-// getJWTClaims attempts to retrieve the JWT claims from the object's JWT secret. The object can either be an v1alpha1.Account or a v1alpha1.Operator.
-// func (n *NatsPusher) getJWTClaims(ctx context.Context, obj client.Object) (*jwt.Claims, error) {
-// 	var err error
-// 	var claims jwt.Claims
-
-// 	switch obj := obj.(type) {
-// 	case *v1alpha1.Operator:
-// 		jwtSecret, err := n.CV1Interface.Secrets(obj.GetNamespace()).Get(ctx, obj.Spec.JWTSecretName, v1.GetOptions{})
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 		objJWT := string(jwtSecret.Data["jwt"])
-// 		claims, err = jwt.DecodeOperatorClaims(objJWT)
-// 		return &claims, err
-// 	case *v1alpha1.Account:
-// 		jwtSecret, err := n.CV1Interface.Secrets(obj.GetNamespace()).Get(ctx, obj.Spec.JWTSecretName, v1.GetOptions{})
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 		objJWT := string(jwtSecret.Data["jwt"])
-// 		claims, err = jwt.DecodeAccountClaims(objJWT)
-// 		return &claims, err
-// 	default:
-// 		err = errors.New("unknown object type")
-// 		return nil, err
-// 	}
-// }

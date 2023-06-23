@@ -233,7 +233,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 		opClaims.Type = jwt.OperatorClaim
 		opClaims.Operator = op
 
-		keys, err := nkeys.FromSeed(seedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey])
+		keys, err := nkeys.ParseDecoratedNKey(seedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey])
 		if err != nil {
 			logger.Error(err, "failed to get nkeys from seed")
 			return err
@@ -334,6 +334,8 @@ func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, op
 		})
 	}
 
+	// TODO @JoeLanglands the system account should only be marked ready when it has a system user to be able to log in with!
+
 	if !sysAcc.Status.IsReady() {
 		logger.V(1).Info("system account not ready")
 		operator.Status.MarkSystemAccountNotReady("system account not ready", "")
@@ -342,6 +344,17 @@ func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, op
 			Resource: accountsnatsiov1alpha1.Account{}.ResourceVersion,
 		}, operator.Spec.SystemAccountRef.Name)
 	} else {
+		// The system account is ready, but does it have a system user to log in with?
+		if err := r.ensureSystemAccountHasUser(ctx, &sysAcc); errors.IsNotFound(err) {
+			logger.V(1).Info("system account has no system user")
+			operator.Status.MarkSystemAccountNotReady("system account has no system user", "")
+			return "", err
+		} else if err != nil {
+			logger.Error(err, "failed to ensure system account has system user")
+			operator.Status.MarkSystemAccountNotReady("failed to ensure system account has system user", "")
+			return "", err
+		}
+		// end clean-up
 		operator.Status.MarkSystemAccountReady()
 	}
 
@@ -365,7 +378,7 @@ func (r *OperatorReconciler) updateOperatorJWTSigningKeys(ctx context.Context, o
 
 	opClaims.SigningKeys = jwt.StringList(sKeys)
 
-	kPair, err := nkeys.FromSeed(operatorSeed)
+	kPair, err := nkeys.ParseDecoratedNKey(operatorSeed)
 	if err != nil {
 		logger.Error(err, "failed to get nkeys from seed")
 		return err
@@ -384,6 +397,26 @@ func (r *OperatorReconciler) updateOperatorJWTSigningKeys(ctx context.Context, o
 	}
 
 	return nil
+}
+
+func (r *OperatorReconciler) ensureSystemAccountHasUser(ctx context.Context, sysAcc *accountsnatsiov1alpha1.Account) error {
+	logger := log.FromContext(ctx)
+
+	// All users of the system account should be within its namespace
+	usrList, err := r.AccountsClientSet.Users(sysAcc.GetNamespace()).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		logger.V(1).Info("failed to list users for system account", "error", err)
+		return err
+	}
+
+	for _, usr := range usrList.Items {
+		if usr.Status.IsReady() && usr.Status.AccountRef.Name == sysAcc.GetName() {
+			// System account has a user so return nil
+			return nil
+		}
+	}
+
+	return errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.User{}.ResourceVersion), "User")
 }
 
 // SetupWithManager sets up the controller with the Manager.

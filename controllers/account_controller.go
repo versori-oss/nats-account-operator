@@ -231,7 +231,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			SigningKeys: sKeysPublicKeys,
 		}
 
-		kPair, err := nkeys.FromSeed(opSkey)
+		kPair, err := nkeys.ParseDecoratedNKey(opSkey)
 		if err != nil {
 			logger.Error(err, "failed to make key pair from seed")
 			return err
@@ -324,7 +324,7 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc
 
 	accClaims.SigningKeys = jwt.StringList(sKeys)
 
-	kPair, err := nkeys.FromSeed(operatorSeed)
+	kPair, err := nkeys.ParseDecoratedNKey(operatorSeed)
 	if err != nil {
 		logger.Error(err, "failed to create nkeys from operator seed")
 		return err

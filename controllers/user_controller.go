@@ -121,6 +121,12 @@ func (r *UserReconciler) ensureAccountResolved(ctx context.Context, usr *account
 		return []byte{}, err
 	}
 
+	if !sKey.Status.GetCondition(accountsnatsiov1alpha1.SigningKeyConditionOwnerResolved).IsTrue() {
+		usr.Status.MarkAccountResolveUnknown("signing key owner not resolved", "")
+		logger.Info("signing key owner not yet resolved for user", "user: %s", usr.Name)
+		return []byte{}, errors.NewServiceUnavailable("signing key owner not resolved") // not sure if this error type is correct here
+	}
+
 	skOwnerRef := sKey.Status.OwnerRef
 	skOwnerRuntimeObj, _ := r.Scheme.New(skOwnerRef.GetGroupVersionKind())
 
@@ -153,7 +159,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) || errors.IsNotFound(errCreds) {
 		// one or the other is not found, so re-create the creds, seed and jwt and then update/create the secrets
 
-		kPair, err := nkeys.FromSeed(accSKey)
+		kPair, err := nkeys.ParseDecoratedNKey(accSKey)
 		if err != nil {
 			logger.Error(err, "failed to make key pair from seed")
 			return err

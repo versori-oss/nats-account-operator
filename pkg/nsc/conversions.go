@@ -21,6 +21,9 @@ func ConvertToNATSOperatorLimits(limits v1alpha1.AccountLimits) jwt.OperatorLimi
 }
 
 func ConvertTimeRanges(times []v1alpha1.StartEndTime) []jwt.TimeRange {
+	if times == nil {
+		return nil
+	}
 	result := make([]jwt.TimeRange, len(times))
 	for _, t := range times {
 		result = append(result, jwt.TimeRange{
@@ -32,12 +35,20 @@ func ConvertTimeRanges(times []v1alpha1.StartEndTime) []jwt.TimeRange {
 }
 
 func ConvertToNATSLimits(limits v1alpha1.UserLimits) jwt.Limits {
-	return jwt.Limits{
+	jwtLimits := jwt.Limits{
 		Max:     int64(limits.Max),
 		Payload: int64(limits.Payload),
-		Src:     limits.Src,
-		Times:   ConvertTimeRanges(limits.Times),
 	}
+
+	if limits.Src != nil {
+		jwtLimits.Src = *limits.Src
+	}
+
+	if limits.Times != nil {
+		jwtLimits.Times = ConvertTimeRanges(*limits.Times)
+	}
+
+	return jwtLimits
 }
 
 func ConvertToNATSExportType(ieType v1alpha1.ImportExportType) jwt.ExportType {
@@ -126,7 +137,7 @@ func ConvertToNATSIdentities(idents []v1alpha1.Identity) []jwt.Identity {
 }
 
 func ConvertToNATSUserPermissions(permissions v1alpha1.UserPermissions) jwt.Permissions {
-	return jwt.Permissions{
+	perms := jwt.Permissions{
 		Pub: jwt.Permission{
 			Allow: permissions.Pub.Allow,
 			Deny:  permissions.Pub.Deny,
@@ -135,9 +146,14 @@ func ConvertToNATSUserPermissions(permissions v1alpha1.UserPermissions) jwt.Perm
 			Allow: permissions.Sub.Allow,
 			Deny:  permissions.Sub.Deny,
 		},
-		Resp: &jwt.ResponsePermission{
+	}
+
+	if permissions.Resp != nil {
+		perms.Resp = &jwt.ResponsePermission{
 			MaxMsgs: permissions.Resp.Max,
 			Expires: time.Duration(permissions.Resp.TTL) * time.Second,
-		},
+		}
 	}
+
+	return perms
 }
