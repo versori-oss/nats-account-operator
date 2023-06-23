@@ -56,10 +56,11 @@ type UserSpec struct {
 	BearerToken bool `json:"bearerToken"`
 }
 
+// TODO @JoeLanglands I think you need to make Resp an optional parameter
 type UserPermissions struct {
-	Pub  Permission     `json:"pub"`
-	Sub  Permission     `json:"sub"`
-	Resp RespPermission `json:"resp"`
+	Pub  Permission      `json:"pub"`
+	Sub  Permission      `json:"sub"`
+	Resp *RespPermission `json:"resp,omitempty"`
 }
 
 type Permission struct {
@@ -77,10 +78,10 @@ type UserLimits struct {
 	Payload int `json:"payload"`
 
 	// Src is a comma-separated list of CIDR blocks
-	Src string `json:"src"`
+	Src *string `json:"src,omitempty"`
 
 	// Times is a list of start/end times in the format "15:04:05".
-	Times []StartEndTime `json:"times"`
+	Times *[]StartEndTime `json:"times,omitempty"`
 }
 
 type StartEndTime struct {

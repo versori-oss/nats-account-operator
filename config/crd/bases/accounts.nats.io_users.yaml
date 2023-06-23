@@ -73,8 +73,6 @@ spec:
                 required:
                 - max
                 - payload
-                - src
-                - times
                 type: object
               permissions:
                 description: Permissions is a JWT claim for the User.
@@ -119,7 +117,6 @@ spec:
                     type: object
                 required:
                 - pub
-                - resp
                 - sub
                 type: object
               seedSecretName:
