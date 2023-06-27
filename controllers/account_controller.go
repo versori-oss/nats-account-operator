@@ -27,6 +27,8 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"github.com/versori-oss/nats-account-operator/pkg/apis"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -46,7 +48,7 @@ import (
 
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
-	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	v1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
@@ -77,7 +79,7 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 
 	logger.V(1).Info("reconciling account", "account", req.Name)
 
-	acc := new(accountsnatsiov1alpha1.Account)
+	acc := new(v1alpha1.Account)
 	if err := r.Client.Get(ctx, req.NamespacedName, acc); err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("account deleted")
@@ -91,17 +93,16 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	originalStatus := acc.Status.DeepCopy()
 
 	defer func() {
-		if err != nil {
-			return
-		}
 		if !equality.Semantic.DeepEqual(originalStatus, acc.Status) {
-			if err = r.Status().Update(ctx, acc); err != nil {
-				if errors.IsConflict(err) {
+			if err2 := r.Status().Update(ctx, acc); err2 != nil {
+				if errors.IsConflict(err2) {
 					result.RequeueAfter = time.Second * 30
+
+					err = nil
 					return
 				}
-				logger.Error(err, "failed to update account status")
 
+				logger.Error(err, "failed to update account status")
 			}
 		}
 	}()
@@ -135,23 +136,23 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	return ctrl.Result{}, nil
 }
 
-func (r *AccountReconciler) ensureSigningKeysUpdated(ctx context.Context, acc *accountsnatsiov1alpha1.Account) ([]accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, error) {
+func (r *AccountReconciler) ensureSigningKeysUpdated(ctx context.Context, acc *v1alpha1.Account) ([]v1alpha1.SigningKeyEmbeddedStatus, error) {
 	logger := log.FromContext(ctx)
 
 	skList, err := r.AccountsClientSet.SigningKeys(acc.Namespace).List(ctx, metav1.ListOptions{})
 	if err == nil && len(skList.Items) == 0 {
 		logger.Info("no signing keys found")
 		acc.Status.MarkSigningKeysUpdateUnknown("no signing keys found", "")
-		return nil, errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
+		return nil, errors.NewNotFound(v1alpha1.Resource(v1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
 	} else if err != nil {
 		logger.Error(err, "failed to list signing keys")
 		return nil, err
 	}
 
-	signingKeys := make([]accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, 0)
+	signingKeys := make([]v1alpha1.SigningKeyEmbeddedStatus, 0)
 	for _, sk := range skList.Items {
 		if sk.Status.IsReady() && sk.Status.OwnerRef.Namespace == acc.Namespace && sk.Status.OwnerRef.Name == acc.Name {
-			signingKeys = append(signingKeys, accountsnatsiov1alpha1.SigningKeyEmbeddedStatus{
+			signingKeys = append(signingKeys, v1alpha1.SigningKeyEmbeddedStatus{
 				Name:    sk.GetName(),
 				KeyPair: *sk.Status.KeyPair,
 			})
@@ -161,51 +162,120 @@ func (r *AccountReconciler) ensureSigningKeysUpdated(ctx context.Context, acc *a
 	if len(signingKeys) == 0 {
 		logger.V(1).Info("no ready signing keys found for account")
 		acc.Status.MarkSigningKeysUpdateUnknown("no ready signing keys found for account", "account: %s", acc.Name)
-		return nil, errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
+		return nil, errors.NewNotFound(v1alpha1.Resource(v1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
 	}
 
 	acc.Status.MarkSigningKeysUpdated(signingKeys)
 	return signingKeys, nil
 }
 
-func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *accountsnatsiov1alpha1.Account) ([]byte, error) {
+func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *v1alpha1.Account) ([]byte, error) {
 	logger := log.FromContext(ctx)
 
-	sKey, err := r.AccountsClientSet.SigningKeys(acc.Namespace).Get(ctx, acc.Spec.SigningKey.Ref.Name, metav1.GetOptions{})
+	skRef := acc.Spec.SigningKey.Ref
+	obj, err := r.Scheme.New(skRef.GetGroupVersionKind())
 	if err != nil {
-		acc.Status.MarkOperatorResolveFailed("failed to get signing key reference for accout", "")
-		logger.Info("failed to get signing key reference for account", "account: %s", acc.Name, "signing key name: %s", acc.Spec.SigningKey.Ref.Name)
-		return []byte{}, err
+		acc.Status.MarkOperatorResolveFailed(
+			v1alpha1.ReasonUnsupportedSigningKey, "unsupported GroupVersionKind: %s", err.Error())
+
+		return nil, err
 	}
 
-	if !sKey.Status.GetCondition(accountsnatsiov1alpha1.SigningKeyConditionOwnerResolved).IsTrue() {
-		return []byte{}, errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.SigningKey{}.ResourceVersion), sKey.Name)
+	signingKey, ok := obj.(client.Object)
+	if !ok {
+		acc.Status.MarkOperatorResolveFailed(
+			v1alpha1.ReasonUnsupportedSigningKey, "runtime.Object cannot be converted to client.Object", obj.GetObjectKind().GroupVersionKind())
+
+		return nil, fmt.Errorf("failed to cast runtime.Object to client.Object")
 	}
 
-	skOwnerRef := sKey.Status.OwnerRef
-	skOwnerRuntimeObj, _ := r.Scheme.New(skOwnerRef.GetGroupVersionKind())
+	err = r.Client.Get(ctx, client.ObjectKey{
+		Namespace: skRef.Namespace,
+		Name:      skRef.Name,
+	}, signingKey)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			acc.Status.MarkOperatorResolveFailed(
+				v1alpha1.ReasonNotFound,
+				"%s, %s/%s: not found",
+				signingKey.GetObjectKind().GroupVersionKind(),
+				skRef.Namespace,
+				skRef.Name,
+			)
 
-	switch skOwnerRuntimeObj.(type) {
-	case *accountsnatsiov1alpha1.Operator:
-		acc.Status.MarkOperatorResolved(accountsnatsiov1alpha1.InferredObjectReference{
-			Name:      skOwnerRef.Name,
-			Namespace: skOwnerRef.Namespace,
-		})
+			return nil, err
+		}
+
+		acc.Status.MarkOperatorResolveUnknown(v1alpha1.ReasonUnknownError, "%s", err.Error())
+
+		return nil, err
+	}
+
+	conditionAccessor, ok := signingKey.(apis.ConditionManagerAccessor)
+	if !ok {
+		acc.Status.MarkOperatorResolveFailed(
+			v1alpha1.ReasonUnsupportedSigningKey,
+			"%s does not implement ConditionAccessor: %T",
+			signingKey.GetObjectKind().GroupVersionKind(),
+			signingKey,
+		)
+
+		return nil, fmt.Errorf("signing key ref does not implement ConditionAccessor: %T", signingKey)
+	}
+
+	if !conditionAccessor.GetConditionManager().IsHappy() {
+		acc.Status.MarkOperatorResolveUnknown(v1alpha1.ReasonNotReady, "signing key not ready")
+
+		return nil, fmt.Errorf("signing key not ready")
+	}
+
+	var operator *v1alpha1.Operator
+
+	switch owner := signingKey.(type) {
+	case *v1alpha1.Operator:
+		operator = owner
+	case *v1alpha1.SigningKey:
+		// this should only error if a network error occurs, we've checked that the signing key is happy so
+		// owner refs should be set.
+		operator, err = r.lookupOperatorForSigningKey(ctx, owner)
+		if err != nil {
+			return nil, err
+		}
 	default:
-		acc.Status.MarkOperatorResolveFailed("invalid signing key owner type", "signing key type: %s", skOwnerRef.Kind)
-		return []byte{}, errors.NewBadRequest("invalid signing key owner type")
+		acc.Status.MarkOperatorResolveFailed(
+			v1alpha1.ReasonUnsupportedSigningKey,
+			"expected Operator or SigningKey but got: %T",
+			signingKey,
+		)
+
+		return nil, fmt.Errorf("expected Operator or SigningKey but got: %T", signingKey)
 	}
 
-	skSeedSecret, err := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, sKey.Status.KeyPair.SeedSecretName, metav1.GetOptions{})
+	acc.Status.MarkOperatorResolved(v1alpha1.InferredObjectReference{
+		Namespace: operator.Namespace,
+		Name:      operator.Name,
+	})
+
+	keyPaired, ok := signingKey.(v1alpha1.KeyPairAccessor)
+	if !ok {
+		return nil, fmt.Errorf("signing key ref does not implement KeyPairAccessor: %T", signingKey)
+	}
+
+	keyPair := keyPaired.GetKeyPair()
+	if keyPair == nil {
+		return nil, fmt.Errorf("signing key ref does not have a key pair")
+	}
+
+	skSeedSecret, err := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, keyPair.SeedSecretName, metav1.GetOptions{})
 	if err != nil {
-		logger.Info("failed to get operator seed for signing key", "signing key: %s", sKey.Name, "operator: %s", skOwnerRef.Name)
+		logger.Info("failed to get operator seed for signing key", "signing key: %s", signingKey.GetName(), "operator: %s", operator.GetName())
 		return []byte{}, err
 	}
 
-	return skSeedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey], nil
+	return skSeedSecret.Data[v1alpha1.NatsSecretSeedKey], nil
 }
 
-func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accountsnatsiov1alpha1.Account, sKeys []accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, opSkey []byte) error {
+func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *v1alpha1.Account, sKeys []v1alpha1.SigningKeyEmbeddedStatus, opSkey []byte) error {
 	logger := log.FromContext(ctx)
 
 	natsHelper := nsc.NscHelper{
@@ -243,7 +313,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		jwtData := map[string][]byte{accountsnatsiov1alpha1.NatsSecretJWTKey: []byte(ajwt)}
+		jwtData := map[string][]byte{v1alpha1.NatsSecretJWTKey: []byte(ajwt)}
 		jwtSecret := NewSecret(acc.Spec.JWTSecretName, acc.Namespace, WithData(jwtData), WithImmutable(false))
 		if err := ctrl.SetControllerReference(acc, &jwtSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set account as owner of jwt secret")
@@ -255,7 +325,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		seedData := map[string][]byte{accountsnatsiov1alpha1.NatsSecretSeedKey: seed, accountsnatsiov1alpha1.NatsSecretPublicKeyKey: []byte(publicKey)}
+		seedData := map[string][]byte{v1alpha1.NatsSecretSeedKey: seed, v1alpha1.NatsSecretPublicKeyKey: []byte(publicKey)}
 		seedSecret := NewSecret(acc.Spec.SeedSecretName, acc.Namespace, WithData(seedData), WithImmutable(true))
 		if err := ctrl.SetControllerReference(acc, &seedSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set account as owner of seed secret")
@@ -306,10 +376,10 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 	return nil
 }
 
-func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc *accountsnatsiov1alpha1.Account, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string, natsHelper nsc.NSCInterface) error {
+func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc *v1alpha1.Account, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string, natsHelper nsc.NSCInterface) error {
 	logger := log.FromContext(ctx)
 
-	accJWTEncoded := string(jwtSecret.Data[accountsnatsiov1alpha1.NatsSecretJWTKey])
+	accJWTEncoded := string(jwtSecret.Data[v1alpha1.NatsSecretJWTKey])
 	accClaims, err := jwt.DecodeAccountClaims(accJWTEncoded)
 	if err != nil {
 		logger.Error(err, "failed to decode account jwt")
@@ -334,7 +404,7 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc
 		return err
 	}
 
-	jwtSecret.Data[accountsnatsiov1alpha1.NatsSecretJWTKey] = []byte(ajwt)
+	jwtSecret.Data[v1alpha1.NatsSecretJWTKey] = []byte(ajwt)
 	_, err = r.CV1Interface.Secrets(jwtSecret.Namespace).Update(ctx, jwtSecret, metav1.UpdateOptions{})
 	if err != nil {
 		logger.Error(err, "failed to update jwt secret")
@@ -353,10 +423,10 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc
 }
 
 // isSystemAccount returns true if acc is the system account this can only be used if the accounts operator has been resolved.
-func (r *AccountReconciler) isSystemAccount(ctx context.Context, acc *accountsnatsiov1alpha1.Account) (bool, error) {
+func (r *AccountReconciler) isSystemAccount(ctx context.Context, acc *v1alpha1.Account) (bool, error) {
 	logger := log.FromContext(ctx)
 
-	if !acc.Status.GetCondition(accountsnatsiov1alpha1.AccountConditionOperatorResolved).IsTrue() {
+	if !acc.Status.GetCondition(v1alpha1.AccountConditionOperatorResolved).IsTrue() {
 		logger.V(1).Info("operator not resolved for account")
 		// just return true here because we DO NOT push when true, so essentially wait for next reconcile when operator is resolved
 		return true, nil
@@ -367,7 +437,7 @@ func (r *AccountReconciler) isSystemAccount(ctx context.Context, acc *accountsna
 		return true, err
 	}
 
-	if !operator.Status.GetCondition(accountsnatsiov1alpha1.OperatorConditionSystemAccountResolved).IsTrue() {
+	if !operator.Status.GetCondition(v1alpha1.OperatorConditionSystemAccountResolved).IsTrue() {
 		logger.V(1).Info("system account not yet resolved for operator")
 		return true, nil
 	}
@@ -379,16 +449,26 @@ func (r *AccountReconciler) isSystemAccount(ctx context.Context, acc *accountsna
 	return false, nil
 }
 
+func (r *AccountReconciler) lookupOperatorForSigningKey(ctx context.Context, sk *v1alpha1.SigningKey) (*v1alpha1.Operator, error) {
+	ownerRef := sk.Status.OwnerRef
+
+	if ownerRef == nil {
+		return nil, fmt.Errorf("signing key %s/%s has no owner reference", sk.Namespace, sk.Name)
+	}
+
+	return r.AccountsClientSet.Operators(ownerRef.Namespace).Get(ctx, ownerRef.Name, metav1.GetOptions{})
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	logger := mgr.GetLogger().WithName("AccountReconciler")
 	err := ctrl.NewControllerManagedBy(mgr).
-		For(&accountsnatsiov1alpha1.Account{}).
+		For(&v1alpha1.Account{}).
 		Owns(&v1.Secret{}).
 		Watches(
-			&source.Kind{Type: &accountsnatsiov1alpha1.SigningKey{}},
+			&source.Kind{Type: &v1alpha1.SigningKey{}},
 			handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
-				signingKey, ok := obj.(*accountsnatsiov1alpha1.SigningKey)
+				signingKey, ok := obj.(*v1alpha1.SigningKey)
 				if !ok {
 					logger.Info("SigningKey watcher received non-SigningKey object",
 						"kind", obj.GetObjectKind().GroupVersionKind().String())
@@ -400,7 +480,7 @@ func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					return nil
 				}
 
-				accountGVK := accountsnatsiov1alpha1.GroupVersion.WithKind("Account")
+				accountGVK := v1alpha1.GroupVersion.WithKind("Account")
 				if accountGVK != ownerRef.GetGroupVersionKind() {
 					return nil
 				}

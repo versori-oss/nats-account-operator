@@ -24,6 +24,10 @@ func (*Operator) GetConditionSet() apis.ConditionSet {
 	return operatorConditionSet
 }
 
+func (o *Operator) GetConditionManager() apis.ConditionManager {
+	return operatorConditionSet.Manage(&o.Status)
+}
+
 // GetCondition returns the condition currently associated with the given type, or nil.
 func (os *OperatorStatus) GetCondition(t apis.ConditionType) *apis.Condition {
 	return operatorConditionSet.Manage(os).GetCondition(t)

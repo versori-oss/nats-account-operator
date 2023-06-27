@@ -155,6 +155,10 @@ type Account struct {
 	Status AccountStatus `json:"status,omitempty"`
 }
 
+func (a *Account) GetKeyPair() *KeyPair {
+	return a.Status.KeyPair
+}
+
 //+kubebuilder:object:root=true
 
 // AccountList contains a list of Account

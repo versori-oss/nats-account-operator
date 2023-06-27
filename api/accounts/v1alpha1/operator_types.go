@@ -110,6 +110,10 @@ type Operator struct {
 	Status OperatorStatus `json:"status,omitempty"`
 }
 
+func (o *Operator) GetKeyPair() *KeyPair {
+	return o.Status.KeyPair
+}
+
 //+kubebuilder:object:root=true
 
 // OperatorList contains a list of Operator

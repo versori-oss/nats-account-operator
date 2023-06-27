@@ -24,6 +24,10 @@ func (*Account) GetConditionSet() apis.ConditionSet {
 	return accountConditionSet
 }
 
+func (a *Account) GetConditionManager() apis.ConditionManager {
+	return accountConditionSet.Manage(&a.Status)
+}
+
 // GetCondition returns the condition currently associated with the given type, or nil.
 func (s *AccountStatus) GetCondition(t apis.ConditionType) *apis.Condition {
 	return accountConditionSet.Manage(s).GetCondition(t)

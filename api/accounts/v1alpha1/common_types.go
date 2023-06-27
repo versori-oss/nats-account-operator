@@ -44,11 +44,6 @@ type Identity struct {
 	Proof string `json:"proof"`
 }
 
-type KeyPair struct {
-	PublicKey      string `json:"publicKey"`
-	SeedSecretName string `json:"seedSecretName"`
-}
-
 type SigningKeyEmbeddedStatus struct {
 	Name    string  `json:"name"`
 	KeyPair KeyPair `json:"keyPair,omitempty"`

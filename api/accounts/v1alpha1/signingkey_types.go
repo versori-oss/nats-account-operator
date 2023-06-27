@@ -86,6 +86,10 @@ type SigningKey struct {
 	Status SigningKeyStatus `json:"status,omitempty"`
 }
 
+func (s *SigningKey) GetKeyPair() *KeyPair {
+	return s.Status.KeyPair
+}
+
 //+kubebuilder:object:root=true
 
 // SigningKeyList contains a list of SigningKey
