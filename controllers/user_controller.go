@@ -97,13 +97,13 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 		}
 	}()
 
-	accSKey, err := r.ensureAccountResolved(ctx, usr)
+	accPKey, accSKey, err := r.ensureAccountResolved(ctx, usr)
 	if err != nil {
 		logger.Error(err, "failed to ensure owner resolved")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureCredsSecrets(ctx, usr, accSKey); err != nil {
+	if err := r.ensureCredsSecrets(ctx, usr, accPKey, accSKey); err != nil {
 		logger.Error(err, "failed to ensure JWT seed secrets")
 		return ctrl.Result{}, err
 	}
@@ -111,46 +111,58 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 	return ctrl.Result{}, nil
 }
 
-func (r *UserReconciler) ensureAccountResolved(ctx context.Context, usr *accountsnatsiov1alpha1.User) ([]byte, error) {
+func (r *UserReconciler) ensureAccountResolved(ctx context.Context, usr *accountsnatsiov1alpha1.User) (string, []byte, error) {
 	logger := log.FromContext(ctx)
 
 	sKey, err := r.AccountsClientSet.SigningKeys(usr.Namespace).Get(ctx, usr.Spec.SigningKey.Ref.Name, metav1.GetOptions{})
 	if err != nil {
 		usr.Status.MarkAccountResolveFailed("failed to get signing key for user", "")
 		logger.Info("failed to get signing key for user", "user: %s", usr.Name)
-		return []byte{}, err
+		return "", []byte{}, err
 	}
 
 	if !sKey.Status.GetCondition(accountsnatsiov1alpha1.SigningKeyConditionOwnerResolved).IsTrue() {
 		usr.Status.MarkAccountResolveUnknown("signing key owner not resolved", "")
 		logger.Info("signing key owner not yet resolved for user", "user: %s", usr.Name)
-		return []byte{}, errors.NewServiceUnavailable("signing key owner not resolved") // not sure if this error type is correct here
+		return "", []byte{}, errors.NewServiceUnavailable("signing key owner not resolved") // not sure if this error type is correct here
 	}
 
+	var publicKey string
 	skOwnerRef := sKey.Status.OwnerRef
 	skOwnerRuntimeObj, _ := r.Scheme.New(skOwnerRef.GetGroupVersionKind())
 
 	switch skOwnerRuntimeObj.(type) {
 	case *accountsnatsiov1alpha1.Account:
+		// NOTE: This is inefficient really, I'd like to get the public key from the Status of the account. The trouble is, it doesn't get populated
+		// until it ensures that there is a 'system' user to be ready to push JWT's to the server.
+		acc, err := r.AccountsClientSet.Accounts(skOwnerRef.Namespace).Get(ctx, skOwnerRef.Name, metav1.GetOptions{})
+		if err != nil {
+			return "", []byte{}, err
+		}
+		accSeedSecret, err := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, acc.Spec.SeedSecretName, metav1.GetOptions{})
+		publicKey = string(accSeedSecret.Data[accountsnatsiov1alpha1.NatsSecretPublicKeyKey])
+		if err != nil {
+			return "", []byte{}, err
+		}
 		usr.Status.MarkAccountResolved(accountsnatsiov1alpha1.InferredObjectReference{
 			Namespace: skOwnerRef.Namespace,
 			Name:      skOwnerRef.Name,
 		})
 	default:
 		usr.Status.MarkAccountResolveFailed("invalid signing key owner type", "signing key type: %s", skOwnerRef.Kind)
-		return []byte{}, errors.NewBadRequest("invalid signing key owner type")
+		return "", []byte{}, errors.NewBadRequest("invalid signing key owner type")
 	}
 
 	skSeedSecret, err := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, sKey.Spec.SeedSecretName, metav1.GetOptions{})
 	if err != nil {
 		logger.Info("failed to get account seed for signing key", "account: %s", usr.Status.AccountRef.Name, "signing key: %s", sKey.Name)
-		return []byte{}, err
+		return "", []byte{}, err
 	}
 
-	return skSeedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey], nil
+	return publicKey, skSeedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey], nil
 }
 
-func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsnatsiov1alpha1.User, accSKey []byte) error {
+func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsnatsiov1alpha1.User, accPKey string, accSKey []byte) error {
 	logger := log.FromContext(ctx)
 
 	_, errSeed := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.SeedSecretName, metav1.GetOptions{})
@@ -171,7 +183,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 			BearerToken: usr.Spec.BearerToken,
 		}
 
-		ujwt, publicKey, seed, err := nsc.CreateUser(usr.Name, usrClaims, kPair)
+		ujwt, publicKey, seed, err := nsc.CreateUser(usr.Name, usrClaims, kPair, accPKey)
 		if err != nil {
 			logger.Error(err, "failed to create user jwt")
 			return err

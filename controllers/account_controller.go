@@ -255,7 +255,7 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 			return err
 		}
 
-		seedData := map[string][]byte{accountsnatsiov1alpha1.NatsSecretSeedKey: seed}
+		seedData := map[string][]byte{accountsnatsiov1alpha1.NatsSecretSeedKey: seed, accountsnatsiov1alpha1.NatsSecretPublicKeyKey: []byte(publicKey)}
 		seedSecret := NewSecret(acc.Spec.SeedSecretName, acc.Namespace, WithData(seedData), WithImmutable(true))
 		if err := ctrl.SetControllerReference(acc, &seedSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set account as owner of seed secret")
@@ -294,7 +294,6 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *accou
 		logger.Error(errJWT, "failed to get jwt secret")
 		return errJWT
 	} else {
-		// err := natsPusher.UpdateJWT(ctx, )
 		err := r.updateAccountJWTSigningKeys(ctx, acc, opSkey, jwtSec, sKeysPublicKeys, &natsHelper)
 		if err != nil {
 			logger.V(1).Info("failed to update account JWT with signing keys", "error", err)
