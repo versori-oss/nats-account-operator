@@ -28,7 +28,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"github.com/versori-oss/nats-account-operator/pkg/apis"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -49,6 +48,7 @@ import (
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
 	v1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/pkg/apis"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )

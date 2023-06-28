@@ -47,7 +47,7 @@ import (
 
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
-	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
@@ -74,7 +74,7 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 
 	logger.V(1).Info("reconciling operator", "name", req.Name)
 
-	operator := new(accountsnatsiov1alpha1.Operator)
+	operator := new(v1alpha1.Operator)
 	if err := r.Get(ctx, req.NamespacedName, operator); err != nil {
 		if errors.IsNotFound(err) {
 			logger.V(1).Info("operator deleted")
@@ -104,6 +104,12 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 		}
 	}()
 
+	if err := r.ensureSeedSecret(ctx, operator); err != nil {
+		logger.Error(err, "failed to ensure seed secret")
+
+		return ctrl.Result{}, err
+	}
+
 	sysAccId, err := r.ensureSystemAccountResolved(ctx, operator)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -111,12 +117,6 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 			return ctrl.Result{RequeueAfter: time.Second * 30}, nil
 		}
 		logger.Error(err, "failed to ensure system account resolved")
-
-		return ctrl.Result{}, err
-	}
-
-	if err := r.ensureSeedSecret(ctx, operator); err != nil {
-		logger.Error(err, "failed to ensure seed secret")
 
 		return ctrl.Result{}, err
 	}
@@ -142,7 +142,7 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 	return ctrl.Result{}, nil
 }
 
-func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *accountsnatsiov1alpha1.Operator) error {
+func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *v1alpha1.Operator) error {
 	logger := log.FromContext(ctx)
 
 	// check if secret with operator seed exists
@@ -167,12 +167,12 @@ func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *acc
 
 		labels := map[string]string{
 			"operator-name": operator.Name,
-			"secret-type":   string(accountsnatsiov1alpha1.NatsSecretTypeSeed),
+			"secret-type":   string(v1alpha1.NatsSecretTypeSeed),
 		}
 
 		data := map[string][]byte{
-			accountsnatsiov1alpha1.NatsSecretSeedKey:      seed,
-			accountsnatsiov1alpha1.NatsSecretPublicKeyKey: []byte(publicKey),
+			v1alpha1.NatsSecretSeedKey:      seed,
+			v1alpha1.NatsSecretPublicKeyKey: []byte(publicKey),
 		}
 
 		seedSecret := NewSecret(operator.Spec.SeedSecretName, operator.Namespace, WithData(data), WithImmutable(true), WithLabels(labels))
@@ -192,7 +192,7 @@ func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *acc
 		logger.Error(err, "failed to get seed secret")
 		return err
 	} else {
-		publicKey = string(secret.Data[accountsnatsiov1alpha1.NatsSecretPublicKeyKey])
+		publicKey = string(secret.Data[v1alpha1.NatsSecretPublicKeyKey])
 	}
 
 	operator.Status.MarkSeedSecretReady(publicKey, secret.Name)
@@ -200,7 +200,7 @@ func (r *OperatorReconciler) ensureSeedSecret(ctx context.Context, operator *acc
 	return nil
 }
 
-func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *accountsnatsiov1alpha1.Operator, sKeys []accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, sysAccId string) error {
+func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *v1alpha1.Operator, sKeys []v1alpha1.SigningKeyEmbeddedStatus, sysAccId string) error {
 	logger := log.FromContext(ctx)
 
 	seedSecret, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.SeedSecretName, metav1.GetOptions{})
@@ -215,7 +215,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 		sKeysPublicKeys = append(sKeysPublicKeys, sk.KeyPair.PublicKey)
 	}
 
-	operatorPublicKey := string(seedSecret.Data[accountsnatsiov1alpha1.NatsSecretPublicKeyKey])
+	operatorPublicKey := string(seedSecret.Data[v1alpha1.NatsSecretPublicKeyKey])
 
 	jwtSec, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
@@ -233,7 +233,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 		opClaims.Type = jwt.OperatorClaim
 		opClaims.Operator = op
 
-		keys, err := nkeys.ParseDecoratedNKey(seedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey])
+		keys, err := nkeys.ParseDecoratedNKey(seedSecret.Data[v1alpha1.NatsSecretSeedKey])
 		if err != nil {
 			logger.Error(err, "failed to get nkeys from seed")
 			return err
@@ -245,7 +245,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 		}
 
 		data := map[string][]byte{
-			accountsnatsiov1alpha1.NatsSecretJWTKey: []byte(jwt),
+			v1alpha1.NatsSecretJWTKey: []byte(jwt),
 		}
 
 		labels := map[string]string{
@@ -272,7 +272,7 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 		logger.Error(err, "failed to get jwt secret")
 		return err
 	} else {
-		err := r.updateOperatorJWTSigningKeys(ctx, seedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey], jwtSec, sKeysPublicKeys)
+		err := r.updateOperatorJWTSigningKeys(ctx, seedSecret.Data[v1alpha1.NatsSecretSeedKey], jwtSec, sKeysPublicKeys)
 		if err != nil {
 			logger.V(1).Info("failed to update operator JWT with signing keys", "error", err)
 			operator.Status.MarkJWTSecretFailed("failed to update JWT with signing keys", "")
@@ -284,23 +284,23 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *acco
 	return nil
 }
 
-func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, operator *accountsnatsiov1alpha1.Operator) ([]accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, error) {
+func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, operator *v1alpha1.Operator) ([]v1alpha1.SigningKeyEmbeddedStatus, error) {
 	logger := log.FromContext(ctx)
 
 	skList, err := r.AccountsClientSet.SigningKeys(operator.Namespace).List(ctx, metav1.ListOptions{})
 	if err == nil && len(skList.Items) == 0 {
 		logger.V(1).Info("no signing keys found")
 		operator.Status.MarkSigningKeysUpdateUnknown("no signing keys found", "")
-		return nil, errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
+		return nil, errors.NewNotFound(v1alpha1.Resource(v1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
 	} else if err != nil {
 		logger.Error(err, "failed to list signing keys")
 		return nil, err
 	}
 
-	signingKeys := make([]accountsnatsiov1alpha1.SigningKeyEmbeddedStatus, 0)
+	signingKeys := make([]v1alpha1.SigningKeyEmbeddedStatus, 0)
 	for _, sk := range skList.Items {
 		if sk.Status.IsReady() && sk.Status.OwnerRef.Namespace == operator.Namespace && sk.Status.OwnerRef.Name == operator.Name {
-			signingKeys = append(signingKeys, accountsnatsiov1alpha1.SigningKeyEmbeddedStatus{
+			signingKeys = append(signingKeys, v1alpha1.SigningKeyEmbeddedStatus{
 				Name:    sk.GetName(),
 				KeyPair: *sk.Status.KeyPair,
 			})
@@ -310,17 +310,17 @@ func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, opera
 	if len(signingKeys) == 0 {
 		logger.V(1).Info("no signing keys found for operator")
 		operator.Status.MarkSigningKeysUpdateUnknown("no signing keys found for operator", "operator: %s", operator.Name)
-		return nil, errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
+		return nil, errors.NewNotFound(v1alpha1.Resource(v1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
 	}
 
 	operator.Status.MarkSigningKeysUpdated(signingKeys)
 	return signingKeys, nil
 }
 
-func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, operator *accountsnatsiov1alpha1.Operator) (string, error) {
+func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, operator *v1alpha1.Operator) (string, error) {
 	logger := log.FromContext(ctx)
 
-	var sysAcc accountsnatsiov1alpha1.Account
+	var sysAcc v1alpha1.Account
 	if err := r.Client.Get(ctx, types.NamespacedName{
 		Namespace: operator.Namespace,
 		Name:      operator.Spec.SystemAccountRef.Name,
@@ -328,7 +328,7 @@ func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, op
 		operator.Status.MarkSystemAccountResolveFailed("system account not found", "account name: %s", operator.Spec.SystemAccountRef.Name)
 		return "", err
 	} else {
-		operator.Status.MarkSystemAccountResolved(accountsnatsiov1alpha1.InferredObjectReference{
+		operator.Status.MarkSystemAccountResolved(v1alpha1.InferredObjectReference{
 			Namespace: sysAcc.GetNamespace(),
 			Name:      sysAcc.GetName(),
 		})
@@ -340,8 +340,8 @@ func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, op
 		logger.V(1).Info("system account not ready")
 		operator.Status.MarkSystemAccountNotReady("system account not ready", "")
 		return "", errors.NewNotFound(schema.GroupResource{
-			Group:    accountsnatsiov1alpha1.GroupVersion.Group,
-			Resource: accountsnatsiov1alpha1.Account{}.ResourceVersion,
+			Group:    v1alpha1.GroupVersion.Group,
+			Resource: v1alpha1.Account{}.ResourceVersion,
 		}, operator.Spec.SystemAccountRef.Name)
 	} else {
 		// The system account is ready, but does it have a system user to log in with?
@@ -364,7 +364,7 @@ func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, op
 func (r *OperatorReconciler) updateOperatorJWTSigningKeys(ctx context.Context, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string) error {
 	logger := log.FromContext(ctx)
 
-	operatorJWTEncoded := string(jwtSecret.Data[accountsnatsiov1alpha1.NatsSecretJWTKey])
+	operatorJWTEncoded := string(jwtSecret.Data[v1alpha1.NatsSecretJWTKey])
 	opClaims, err := jwt.DecodeOperatorClaims(operatorJWTEncoded)
 	if err != nil {
 		logger.Error(err, "failed to decode operator jwt")
@@ -389,7 +389,7 @@ func (r *OperatorReconciler) updateOperatorJWTSigningKeys(ctx context.Context, o
 		return err
 	}
 
-	jwtSecret.Data[accountsnatsiov1alpha1.NatsSecretJWTKey] = []byte(ojwt)
+	jwtSecret.Data[v1alpha1.NatsSecretJWTKey] = []byte(ojwt)
 	_, err = r.CV1Interface.Secrets(jwtSecret.Namespace).Update(ctx, jwtSecret, metav1.UpdateOptions{})
 	if err != nil {
 		logger.Error(err, "failed to update jwt secret")
@@ -399,7 +399,7 @@ func (r *OperatorReconciler) updateOperatorJWTSigningKeys(ctx context.Context, o
 	return nil
 }
 
-func (r *OperatorReconciler) ensureSystemAccountHasUser(ctx context.Context, sysAcc *accountsnatsiov1alpha1.Account) error {
+func (r *OperatorReconciler) ensureSystemAccountHasUser(ctx context.Context, sysAcc *v1alpha1.Account) error {
 	logger := log.FromContext(ctx)
 
 	// All users of the system account should be within its namespace
@@ -416,7 +416,7 @@ func (r *OperatorReconciler) ensureSystemAccountHasUser(ctx context.Context, sys
 		}
 	}
 
-	return errors.NewNotFound(accountsnatsiov1alpha1.Resource(accountsnatsiov1alpha1.User{}.ResourceVersion), "User")
+	return errors.NewNotFound(v1alpha1.Resource(v1alpha1.User{}.ResourceVersion), "User")
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -424,14 +424,14 @@ func (r *OperatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	logger := mgr.GetLogger().WithName("OperatorReconciler")
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&accountsnatsiov1alpha1.Operator{}).
+		For(&v1alpha1.Operator{}).
 		Owns(&v1.Secret{}).
 		Watches(
-			&source.Kind{Type: &accountsnatsiov1alpha1.Account{}},
+			&source.Kind{Type: &v1alpha1.Account{}},
 			handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
 				// whenever an Account is created, updated or deleted, reconcile the Operator for which that account
 				// belongs
-				account, ok := obj.(*accountsnatsiov1alpha1.Account)
+				account, ok := obj.(*v1alpha1.Account)
 				if !ok {
 					logger.V(1).Info("Account watcher received non-Account object",
 						"kind", obj.GetObjectKind().GroupVersionKind().String())
@@ -454,11 +454,11 @@ func (r *OperatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		).
 		Watches(
-			&source.Kind{Type: &accountsnatsiov1alpha1.SigningKey{}},
+			&source.Kind{Type: &v1alpha1.SigningKey{}},
 			handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
 				// whenever a SigningKey is created, updated or deleted, check whether it's owner is an Operator, and
 				// if so, reconcile it.
-				signingKey, ok := obj.(*accountsnatsiov1alpha1.SigningKey)
+				signingKey, ok := obj.(*v1alpha1.SigningKey)
 				if !ok {
 					logger.V(1).Info("SigningKey watcher received non-SigningKey object",
 						"kind", obj.GetObjectKind().GroupVersionKind().String())
@@ -471,7 +471,7 @@ func (r *OperatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					return nil
 				}
 
-				operatorGVK := accountsnatsiov1alpha1.GroupVersion.WithKind("Operator")
+				operatorGVK := v1alpha1.GroupVersion.WithKind("Operator")
 				if operatorGVK != ownerRef.GetGroupVersionKind() {
 
 					return nil

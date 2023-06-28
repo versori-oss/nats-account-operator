@@ -27,6 +27,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -41,7 +42,8 @@ import (
 
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
-	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/pkg/apis"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
@@ -70,7 +72,7 @@ type UserReconciler struct {
 func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	logger := log.FromContext(ctx)
 
-	usr := new(accountsnatsiov1alpha1.User)
+	usr := new(v1alpha1.User)
 	if err := r.Client.Get(ctx, req.NamespacedName, usr); err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("user deleted")
@@ -97,13 +99,13 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 		}
 	}()
 
-	accPKey, accSKey, err := r.ensureAccountResolved(ctx, usr)
+	accKeyPair, err := r.ensureAccountResolved(ctx, usr)
 	if err != nil {
 		logger.Error(err, "failed to ensure owner resolved")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureCredsSecrets(ctx, usr, accPKey, accSKey); err != nil {
+	if err := r.ensureCredsSecrets(ctx, usr, accKeyPair); err != nil {
 		logger.Error(err, "failed to ensure JWT seed secrets")
 		return ctrl.Result{}, err
 	}
@@ -111,59 +113,104 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 	return ctrl.Result{}, nil
 }
 
-func (r *UserReconciler) ensureAccountResolved(ctx context.Context, usr *accountsnatsiov1alpha1.User) (string, []byte, error) {
-	logger := log.FromContext(ctx)
+func (r *UserReconciler) ensureAccountResolved(ctx context.Context, usr *v1alpha1.User) (*v1alpha1.KeyPair, error) {
+	// logger := log.FromContext(ctx)
 
-	sKey, err := r.AccountsClientSet.SigningKeys(usr.Namespace).Get(ctx, usr.Spec.SigningKey.Ref.Name, metav1.GetOptions{})
+	skRef := usr.Spec.SigningKey.Ref
+	obj, err := r.Scheme.New(skRef.GetGroupVersionKind())
 	if err != nil {
-		usr.Status.MarkAccountResolveFailed("failed to get signing key for user", "")
-		logger.Info("failed to get signing key for user", "user: %s", usr.Name)
-		return "", []byte{}, err
+		usr.Status.MarkAccountResolveFailed(
+			v1alpha1.ReasonUnsupportedSigningKey, "unsupported GroupVersionKind: %s", err.Error())
+		return nil, err
 	}
 
-	if !sKey.Status.GetCondition(accountsnatsiov1alpha1.SigningKeyConditionOwnerResolved).IsTrue() {
-		usr.Status.MarkAccountResolveUnknown("signing key owner not resolved", "")
-		logger.Info("signing key owner not yet resolved for user", "user: %s", usr.Name)
-		return "", []byte{}, errors.NewServiceUnavailable("signing key owner not resolved") // not sure if this error type is correct here
+	signingKey, ok := obj.(client.Object)
+	if !ok {
+		usr.Status.MarkAccountResolveFailed(
+			v1alpha1.ReasonUnsupportedSigningKey, "runtime.Object cannot be converted to client.Object", obj.GetObjectKind().GroupVersionKind())
+		return nil, err
 	}
 
-	var publicKey string
-	skOwnerRef := sKey.Status.OwnerRef
-	skOwnerRuntimeObj, _ := r.Scheme.New(skOwnerRef.GetGroupVersionKind())
+	err = r.Client.Get(ctx, client.ObjectKey{Namespace: skRef.Namespace, Name: skRef.Name}, signingKey)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			usr.Status.MarkAccountResolveFailed(
+				v1alpha1.ReasonNotFound, "%s, %s/%s: not found", signingKey.GetObjectKind().GroupVersionKind(), skRef.Namespace, skRef.Name)
+		}
+		return nil, err
+	}
 
-	switch skOwnerRuntimeObj.(type) {
-	case *accountsnatsiov1alpha1.Account:
-		// NOTE: This is inefficient really, I'd like to get the public key from the Status of the account. The trouble is, it doesn't get populated
-		// until it ensures that there is a 'system' user to be ready to push JWT's to the server.
-		acc, err := r.AccountsClientSet.Accounts(skOwnerRef.Namespace).Get(ctx, skOwnerRef.Name, metav1.GetOptions{})
+	conditionAccessor, ok := signingKey.(apis.ConditionManagerAccessor)
+	if !ok {
+		usr.Status.MarkAccountResolveFailed(
+			v1alpha1.ReasonUnsupportedSigningKey,
+			"%s does not implement ConditionAccessor: %T",
+			signingKey.GetObjectKind().GroupVersionKind(),
+			signingKey)
+		return nil, fmt.Errorf("signing key ref does not implement ConditionAccessor: %T", signingKey)
+	}
+
+	if !conditionAccessor.GetConditionManager().IsHappy() {
+		usr.Status.MarkAccountResolveUnknown(v1alpha1.ReasonNotReady, "signing key not ready")
+
+		return nil, fmt.Errorf("signing key not ready")
+	}
+
+	var account *v1alpha1.Account
+
+	switch owner := signingKey.(type) {
+	case *v1alpha1.Account:
+		account = owner
+	case *v1alpha1.SigningKey:
+		account, err = r.lookupAccountForSigningKey(ctx, owner)
 		if err != nil {
-			return "", []byte{}, err
+			return nil, err
 		}
-		accSeedSecret, err := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, acc.Spec.SeedSecretName, metav1.GetOptions{})
-		publicKey = string(accSeedSecret.Data[accountsnatsiov1alpha1.NatsSecretPublicKeyKey])
-		if err != nil {
-			return "", []byte{}, err
-		}
-		usr.Status.MarkAccountResolved(accountsnatsiov1alpha1.InferredObjectReference{
-			Namespace: skOwnerRef.Namespace,
-			Name:      skOwnerRef.Name,
-		})
 	default:
-		usr.Status.MarkAccountResolveFailed("invalid signing key owner type", "signing key type: %s", skOwnerRef.Kind)
-		return "", []byte{}, errors.NewBadRequest("invalid signing key owner type")
+		usr.Status.MarkAccountResolveFailed(
+			v1alpha1.ReasonUnsupportedSigningKey,
+			"expected Account or SigningKey but got: %T",
+			signingKey)
+		return nil, fmt.Errorf("expected Account or SigningKey but got: %T", signingKey)
 	}
 
-	skSeedSecret, err := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, sKey.Spec.SeedSecretName, metav1.GetOptions{})
-	if err != nil {
-		logger.Info("failed to get account seed for signing key", "account: %s", usr.Status.AccountRef.Name, "signing key: %s", sKey.Name)
-		return "", []byte{}, err
+	usr.Status.MarkAccountResolved(v1alpha1.InferredObjectReference{
+		Namespace: account.Namespace,
+		Name:      account.Name,
+	})
+
+	keyPaired, ok := signingKey.(v1alpha1.KeyPairAccessor)
+	if !ok {
+		return nil, fmt.Errorf("signing key ref does not implement KeyPairAccessor: %T", signingKey)
 	}
 
-	return publicKey, skSeedSecret.Data[accountsnatsiov1alpha1.NatsSecretSeedKey], nil
+	keyPair := keyPaired.GetKeyPair()
+	if keyPair == nil {
+		return nil, fmt.Errorf("signing key ref does not have a key pair")
+	}
+
+	return keyPair, nil
 }
 
-func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsnatsiov1alpha1.User, accPKey string, accSKey []byte) error {
+func (r *UserReconciler) lookupAccountForSigningKey(ctx context.Context, sk *v1alpha1.SigningKey) (*v1alpha1.Account, error) {
+	ownerRef := sk.Status.OwnerRef
+
+	if ownerRef == nil {
+		return nil, fmt.Errorf("signing key %s/%s has no owner reference", sk.Namespace, sk.Name)
+	}
+
+	return r.AccountsClientSet.Accounts(ownerRef.Namespace).Get(ctx, ownerRef.Name, metav1.GetOptions{})
+}
+
+func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *v1alpha1.User, keyPair *v1alpha1.KeyPair) error {
 	logger := log.FromContext(ctx)
+
+	accSKeySecret, err := r.CV1Interface.Secrets(usr.Spec.SigningKey.Ref.Namespace).Get(ctx, keyPair.SeedSecretName, metav1.GetOptions{})
+	if err != nil {
+		logger.Error(err, "failed to get users signing key seed secret")
+		return err
+	}
+	accSKey := accSKeySecret.Data[v1alpha1.NatsSecretSeedKey]
 
 	_, errSeed := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.SeedSecretName, metav1.GetOptions{})
 	_, errJWT := r.CV1Interface.Secrets(usr.Namespace).Get(ctx, usr.Spec.JWTSecretName, metav1.GetOptions{})
@@ -183,7 +230,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 			BearerToken: usr.Spec.BearerToken,
 		}
 
-		ujwt, publicKey, seed, err := nsc.CreateUser(usr.Name, usrClaims, kPair, accPKey)
+		ujwt, publicKey, seed, err := nsc.CreateUser(usr.Name, usrClaims, kPair, keyPair.PublicKey)
 		if err != nil {
 			logger.Error(err, "failed to create user jwt")
 			return err
@@ -197,7 +244,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 		}
 
 		// create jwt secret and update or create it on the cluster
-		jwtData := map[string][]byte{accountsnatsiov1alpha1.NatsSecretJWTKey: []byte(ujwt)}
+		jwtData := map[string][]byte{v1alpha1.NatsSecretJWTKey: []byte(ujwt)}
 		jwtSecret := NewSecret(usr.Spec.JWTSecretName, usr.Namespace, WithData(jwtData), WithImmutable(true))
 		if err = ctrl.SetControllerReference(usr, &jwtSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set user as owner of jwt secret")
@@ -211,8 +258,8 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 
 		// create seed secret and update or create it on the cluster
 		seedData := map[string][]byte{
-			accountsnatsiov1alpha1.NatsSecretSeedKey:      seed,
-			accountsnatsiov1alpha1.NatsSecretPublicKeyKey: []byte(publicKey),
+			v1alpha1.NatsSecretSeedKey:      seed,
+			v1alpha1.NatsSecretPublicKeyKey: []byte(publicKey),
 		}
 		seedSecret := NewSecret(usr.Spec.SeedSecretName, usr.Namespace, WithData(seedData), WithImmutable(true))
 		if err = ctrl.SetControllerReference(usr, &seedSecret, r.Scheme); err != nil {
@@ -226,7 +273,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 		}
 
 		// create creds secret and update or create it on the cluster
-		credsData := map[string][]byte{accountsnatsiov1alpha1.NatsSecretCredsKey: userCreds}
+		credsData := map[string][]byte{v1alpha1.NatsSecretCredsKey: userCreds}
 		credsSecret := NewSecret(usr.Spec.CredentialsSecretName, usr.Namespace, WithData(credsData), WithImmutable(false))
 		if err = ctrl.SetControllerReference(usr, &credsSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set user as owner of creds secret")
@@ -263,7 +310,7 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *accountsna
 // SetupWithManager sets up the controller with the Manager.
 func (r *UserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&accountsnatsiov1alpha1.User{}).
+		For(&v1alpha1.User{}).
 		Owns(&v1.Secret{}).
 		Complete(r)
 }
