@@ -64,19 +64,19 @@ func (s *AccountStatus) MarkOperatorResolveUnknown(reason, messageFormat string,
 func (s *AccountStatus) MarkSigningKeysUpdated(signingKeys []SigningKeyEmbeddedStatus) {
 	s.SigningKeys = signingKeys
 
-	accountConditionSet.Manage(s).MarkTrueWithReason(OperatorConditionSigningKeysUpdated, OperatorConditionSigningKeysUpdated, "Found %d signing keys", len(signingKeys))
+	accountConditionSet.Manage(s).MarkTrueWithReason(AccountConditionSigningKeysUpdated, "Signing keys updated", "Found %d signing keys", len(signingKeys))
 }
 
 func (s *AccountStatus) MarkSigningKeysUpdateFailed(reason, messageFormat string, messageA ...interface{}) {
 	s.SigningKeys = nil
 
-	accountConditionSet.Manage(s).MarkFalse(OperatorConditionSigningKeysUpdated, reason, messageFormat, messageA...)
+	accountConditionSet.Manage(s).MarkFalse(AccountConditionSigningKeysUpdated, reason, messageFormat, messageA...)
 }
 
 func (s *AccountStatus) MarkSigningKeysUpdateUnknown(reason, messageFormat string, messageA ...interface{}) {
 	s.SigningKeys = nil
 
-	accountConditionSet.Manage(s).MarkUnknown(OperatorConditionSigningKeysUpdated, reason, messageFormat, messageA...)
+	accountConditionSet.Manage(s).MarkUnknown(AccountConditionSigningKeysUpdated, reason, messageFormat, messageA...)
 }
 
 func (s *AccountStatus) MarkJWTSecretReady() {

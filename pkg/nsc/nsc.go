@@ -4,6 +4,7 @@ package nsc
 
 import (
 	"context"
+	"fmt"
 
 	natsjwt "github.com/nats-io/jwt"
 	"github.com/nats-io/nats.go"
@@ -16,6 +17,7 @@ import (
 
 type NSCInterface interface {
 	PushJWT(ctx context.Context, ajwt string) error
+	GetJWT(ctx context.Context, accId string) (string, error)
 	UpdateJWT(ctx context.Context, accId string, ajwt string) error
 }
 
@@ -43,8 +45,6 @@ func (n *NscHelper) PushJWT(ctx context.Context, ajwt string) error {
 		logger.Error(err, "failed to get system user JWT and seed")
 		return err
 	}
-
-	//TODO @JoeLanglands I think the iss field in the system user claims in the JWT is wrong. I think iss should be the sys account public key whilst the issuer_account is fine to be the signing key's public key
 
 	serverUrl := operator.Spec.AccountServerURL
 
@@ -95,6 +95,37 @@ func (n *NscHelper) UpdateJWT(ctx context.Context, accId string, ajwt string) er
 	return nil
 }
 
+func (n *NscHelper) GetJWT(ctx context.Context, accId string) (string, error) {
+	logger := log.FromContext(ctx)
+
+	var ajwt string
+	operator, sysAcc, err := n.getOperatorAndSysAccount(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	sysUsrJWT, sysUsrSeed, err := n.getSysUsrJWTSeed(ctx, sysAcc)
+	if err != nil {
+		logger.Error(err, "failed to get system user JWT and seed")
+		return "", err
+	}
+
+	serverUrl := operator.Spec.AccountServerURL
+
+	nc, err := nats.Connect(serverUrl, nats.UserJWTAndSeed(sysUsrJWT, sysUsrSeed))
+	if err != nil {
+		return "", err
+	}
+	natsClient := NewNatsClient(nc)
+	defer natsClient.Close()
+
+	ajwt, err = natsClient.GetAccountJWT(ctx, accId)
+	if err != nil {
+		return "", err
+	}
+	return ajwt, nil
+}
+
 // getOperatorAndSysAccount retrieves the operator and system account from the cluster using the accClientSet.
 func (n *NscHelper) getOperatorAndSysAccount(ctx context.Context) (*v1alpha1.Operator, *v1alpha1.Account, error) {
 	operator, err := n.AccClientSet.Operators(n.OperatorRef.Namespace).Get(ctx, n.OperatorRef.Name, v1.GetOptions{})
@@ -123,6 +154,10 @@ func (n *NscHelper) getSysUsrJWTSeed(ctx context.Context, sysAcc *v1alpha1.Accou
 			sysUsr = &usr
 			break
 		}
+	}
+
+	if sysUsr == nil {
+		return "", "", fmt.Errorf("no system user available/ready for system account %s", sysAcc.GetName())
 	}
 
 	usrCredSecret, err := n.CV1Interface.Secrets(sysUsr.GetNamespace()).Get(ctx, sysUsr.Spec.CredentialsSecretName, v1.GetOptions{})

@@ -288,12 +288,8 @@ func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, opera
 	logger := log.FromContext(ctx)
 
 	skList, err := r.AccountsClientSet.SigningKeys(operator.Namespace).List(ctx, metav1.ListOptions{})
-	if err == nil && len(skList.Items) == 0 {
-		logger.V(1).Info("no signing keys found")
-		operator.Status.MarkSigningKeysUpdateUnknown("no signing keys found", "")
-		return nil, errors.NewNotFound(v1alpha1.Resource(v1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
-	} else if err != nil {
-		logger.Error(err, "failed to list signing keys")
+	if err != nil || skList == nil {
+		logger.V(1).Info("failed to list signing keys", "error:", err)
 		return nil, err
 	}
 
@@ -305,12 +301,6 @@ func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, opera
 				KeyPair: *sk.Status.KeyPair,
 			})
 		}
-	}
-
-	if len(signingKeys) == 0 {
-		logger.V(1).Info("no signing keys found for operator")
-		operator.Status.MarkSigningKeysUpdateUnknown("no signing keys found for operator", "operator: %s", operator.Name)
-		return nil, errors.NewNotFound(v1alpha1.Resource(v1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
 	}
 
 	operator.Status.MarkSigningKeysUpdated(signingKeys)

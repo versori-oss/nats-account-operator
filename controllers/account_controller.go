@@ -78,7 +78,6 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	logger := log.FromContext(ctx)
 
 	logger.V(1).Info("reconciling account", "account", req.Name)
-
 	acc := new(v1alpha1.Account)
 	if err := r.Client.Get(ctx, req.NamespacedName, acc); err != nil {
 		if errors.IsNotFound(err) {
@@ -114,8 +113,14 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 			result.RequeueAfter = time.Second * 30
 			return
 		}
-		logger.Error(err, "failed to ensure the operator owning the account was resolved")
+		logger.V(1).Info("failed to ensure the operator owning the account was resolved")
 		return ctrl.Result{}, err
+	}
+
+	nscHelper := nsc.NscHelper{
+		OperatorRef:  acc.Status.OperatorRef,
+		CV1Interface: r.CV1Interface,
+		AccClientSet: r.AccountsClientSet,
 	}
 
 	sKeys, err := r.ensureSigningKeysUpdated(ctx, acc)
@@ -124,13 +129,19 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 			result.RequeueAfter = time.Second * 30
 			return
 		}
-		logger.Error(err, "failed to ensure signing keys were updated")
+		logger.V(1).Info("failed to ensure signing keys were updated")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureSeedJWTSecrets(ctx, acc, sKeys, opSKey); err != nil {
-		logger.Error(err, "failed to ensure account jwt secret")
-		return ctrl.Result{}, err
+	ajwt, err := r.ensureSeedJWTSecrets(ctx, acc, sKeys, opSKey, &nscHelper)
+	if err != nil {
+		logger.V(1).Info("failed to ensure account jwt/secrets ready")
+		return ctrl.Result{RequeueAfter: time.Second * 30}, err
+	}
+
+	if err := r.ensureJWTPushed(ctx, acc, ajwt, &nscHelper); err != nil {
+		logger.V(1).Info("failed to ensure account jwt was pushed, requeuing since the SYS account may not be ready")
+		return ctrl.Result{RequeueAfter: time.Second * 30}, err
 	}
 
 	return ctrl.Result{}, nil
@@ -140,12 +151,8 @@ func (r *AccountReconciler) ensureSigningKeysUpdated(ctx context.Context, acc *v
 	logger := log.FromContext(ctx)
 
 	skList, err := r.AccountsClientSet.SigningKeys(acc.Namespace).List(ctx, metav1.ListOptions{})
-	if err == nil && len(skList.Items) == 0 {
-		logger.Info("no signing keys found")
-		acc.Status.MarkSigningKeysUpdateUnknown("no signing keys found", "")
-		return nil, errors.NewNotFound(v1alpha1.Resource(v1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
-	} else if err != nil {
-		logger.Error(err, "failed to list signing keys")
+	if err != nil || skList == nil {
+		logger.V(1).Info("failed to list signing keys", "error:", err)
 		return nil, err
 	}
 
@@ -157,12 +164,6 @@ func (r *AccountReconciler) ensureSigningKeysUpdated(ctx context.Context, acc *v
 				KeyPair: *sk.Status.KeyPair,
 			})
 		}
-	}
-
-	if len(signingKeys) == 0 {
-		logger.V(1).Info("no ready signing keys found for account")
-		acc.Status.MarkSigningKeysUpdateUnknown("no ready signing keys found for account", "account: %s", acc.Name)
-		return nil, errors.NewNotFound(v1alpha1.Resource(v1alpha1.SigningKey{}.ResourceVersion), "signingkeys")
 	}
 
 	acc.Status.MarkSigningKeysUpdated(signingKeys)
@@ -223,17 +224,16 @@ func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *v1a
 		return nil, fmt.Errorf("signing key ref does not implement ConditionAccessor: %T", signingKey)
 	}
 
-	if !conditionAccessor.GetConditionManager().IsHappy() {
-		acc.Status.MarkOperatorResolveUnknown(v1alpha1.ReasonNotReady, "signing key not ready")
-
-		return nil, fmt.Errorf("signing key not ready")
-	}
-
 	var operator *v1alpha1.Operator
 
 	switch owner := signingKey.(type) {
 	case *v1alpha1.Operator:
 		operator = owner
+		if !conditionAccessor.GetConditionManager().GetCondition(v1alpha1.OperatorConditionSeedSecretReady).IsTrue() {
+			acc.Status.MarkOperatorResolveUnknown(v1alpha1.ReasonNotReady, "signing key not ready")
+
+			return nil, fmt.Errorf("signing key not ready")
+		}
 	case *v1alpha1.SigningKey:
 		// this should only error if a network error occurs, we've checked that the signing key is happy so
 		// owner refs should be set.
@@ -266,28 +266,23 @@ func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *v1a
 		return nil, fmt.Errorf("signing key ref does not have a key pair")
 	}
 
-	skSeedSecret, err := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, keyPair.SeedSecretName, metav1.GetOptions{})
+	skSeedSecret, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, keyPair.SeedSecretName, metav1.GetOptions{})
 	if err != nil {
-		logger.Info("failed to get operator seed for signing key", "signing key: %s", signingKey.GetName(), "operator: %s", operator.GetName())
+		logger.V(1).Info("failed to get operator seed for signing key", "signing key: %s", signingKey.GetName(), "operator: %s", operator.GetName())
 		return []byte{}, err
 	}
 
 	return skSeedSecret.Data[v1alpha1.NatsSecretSeedKey], nil
 }
 
-func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *v1alpha1.Account, sKeys []v1alpha1.SigningKeyEmbeddedStatus, opSkey []byte) error {
+func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *v1alpha1.Account, sKeys []v1alpha1.SigningKeyEmbeddedStatus, opSkey []byte, nscHelper nsc.NSCInterface) (string, error) {
 	logger := log.FromContext(ctx)
-
-	natsHelper := nsc.NscHelper{
-		OperatorRef:  acc.Status.OperatorRef,
-		CV1Interface: r.CV1Interface,
-		AccClientSet: r.AccountsClientSet,
-	}
 
 	_, errSeed := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, acc.Spec.SeedSecretName, metav1.GetOptions{})
 	jwtSec, errJWT := r.CV1Interface.Secrets(acc.Namespace).Get(ctx, acc.Spec.JWTSecretName, metav1.GetOptions{})
 
-	var sKeysPublicKeys []string
+	var ajwt string
+	sKeysPublicKeys := make([]string, 0)
 	for _, sk := range sKeys {
 		sKeysPublicKeys = append(sKeysPublicKeys, sk.KeyPair.PublicKey)
 	}
@@ -304,80 +299,113 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *v1alp
 		kPair, err := nkeys.ParseDecoratedNKey(opSkey)
 		if err != nil {
 			logger.Error(err, "failed to make key pair from seed")
-			return err
+			return "", err
 		}
 
 		ajwt, publicKey, seed, err := nsc.CreateAccount(acc.Name, accClaims, kPair)
 		if err != nil {
 			logger.Error(err, "failed to create account")
-			return err
+			return "", err
 		}
 
 		jwtData := map[string][]byte{v1alpha1.NatsSecretJWTKey: []byte(ajwt)}
 		jwtSecret := NewSecret(acc.Spec.JWTSecretName, acc.Namespace, WithData(jwtData), WithImmutable(false))
 		if err := ctrl.SetControllerReference(acc, &jwtSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set account as owner of jwt secret")
-			return err
+			return "", err
 		}
 
 		if _, err := createOrUpdateSecret(ctx, r.CV1Interface, acc.Namespace, &jwtSecret, !errors.IsNotFound(errJWT)); err != nil {
 			logger.Error(err, "failed to create or update jwt secret")
-			return err
+			return "", err
 		}
 
 		seedData := map[string][]byte{v1alpha1.NatsSecretSeedKey: seed, v1alpha1.NatsSecretPublicKeyKey: []byte(publicKey)}
 		seedSecret := NewSecret(acc.Spec.SeedSecretName, acc.Namespace, WithData(seedData), WithImmutable(true))
 		if err := ctrl.SetControllerReference(acc, &seedSecret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set account as owner of seed secret")
-			return err
+			return "", err
 		}
 
 		if _, err := createOrUpdateSecret(ctx, r.CV1Interface, acc.Namespace, &seedSecret, !errors.IsNotFound(errSeed)); err != nil {
 			logger.Error(err, "failed to create or update seed secret")
-			return err
+			return "", err
 		}
 
-		if isSys, err := r.isSystemAccount(ctx, acc); err == nil && !isSys {
-			err = natsHelper.PushJWT(ctx, ajwt)
-			if err != nil {
-				logger.Info("failed to push account jwt to nats server", "error", err)
-				acc.Status.MarkJWTPushFailed("failed to push account jwt to nats server", "error: %s", err)
-				return nil
-			}
-		} else if err != nil {
-			logger.Error(err, "failed to determine if account is system account")
-			return err
-		}
-
-		acc.Status.MarkJWTPushed()
 		acc.Status.MarkJWTSecretReady()
 		acc.Status.MarkSeedSecretReady(publicKey, seedSecret.Name)
-		return nil
+		return ajwt, nil
 	} else if errSeed != nil {
 		// logging and returning errors here since something could have actually gone wrong
 		acc.Status.MarkSeedSecretUnknown("failed to get seed secret", "")
 		logger.Error(errSeed, "failed to get seed secret")
-		return errSeed
+		return "", errSeed
 	} else if errJWT != nil {
 		acc.Status.MarkJWTSecretUnknown("failed to get jwt secret", "")
-		acc.Status.MarkJWTPushUnknown("failed to get jwt secret", "")
 		logger.Error(errJWT, "failed to get jwt secret")
-		return errJWT
+		return "", errJWT
 	} else {
-		err := r.updateAccountJWTSigningKeys(ctx, acc, opSkey, jwtSec, sKeysPublicKeys, &natsHelper)
+		err := r.updateAccountJWTSigningKeys(ctx, acc, opSkey, jwtSec, sKeysPublicKeys, nscHelper)
 		if err != nil {
 			logger.V(1).Info("failed to update account JWT with signing keys", "error", err)
 			acc.Status.MarkJWTPushUnknown("failed to update account JWT with signing keys", "")
 			acc.Status.MarkJWTSecretUnknown("failed to update account JWT with signing keys", "")
-			return nil
+			return "", err
 		}
 	}
+
+	ajwt = string(jwtSec.Data[v1alpha1.NatsSecretJWTKey])
+	return ajwt, nil
+}
+
+func (r *AccountReconciler) ensureJWTPushed(ctx context.Context, acc *v1alpha1.Account, ajwt string, nscHelper nsc.NSCInterface) error {
+	logger := log.FromContext(ctx)
+
+	if isSys, err := r.isSystemAccount(ctx, acc); err == nil && isSys {
+		// this account is the system account which actually can't be pushed to NATS
+		acc.Status.MarkJWTPushed()
+		return nil
+	} else if err != nil {
+		logger.Error(err, "failed to determine if account JWT is pushed")
+		return err
+	}
+
+	if !acc.Status.GetCondition(v1alpha1.AccountConditionSeedSecretReady).IsTrue() {
+		logger.V(1).Info("account seed secret is not ready, skipping jwt push")
+		return nil
+	}
+
+	_, err := nscHelper.GetJWT(ctx, acc.Status.KeyPair.PublicKey)
+	if _, ok := err.(*nsc.ErrAccountJWTNotPushed); !ok && err != nil {
+		//something unexpected happened
+		acc.Status.MarkJWTPushUnknown("Failed check if account jwt exists", "Failed to get jwt: %s", err.Error())
+		logger.Error(err, "failed to get account jwt")
+		return err
+	} else if err == nil {
+		// account jwt is pushed
+		acc.Status.MarkJWTPushed()
+		return nil
+	}
+
+	err = nscHelper.PushJWT(ctx, ajwt)
+	if err != nil {
+		acc.Status.MarkJWTPushFailed("Failed to push account jwt", "%s", err.Error())
+		logger.V(1).Info("failed to push account jwt", "error", err.Error())
+		return err
+	}
+	acc.Status.MarkJWTPushed()
 
 	return nil
 }
 
-func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc *v1alpha1.Account, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string, natsHelper nsc.NSCInterface) error {
+// updateAccountJWTSigningKeys updates the account JWT with sKeys and pushes it to the NATS server and updates the JWT secret.
+func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc *v1alpha1.Account, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string, nscHelper nsc.NSCInterface) error {
 	logger := log.FromContext(ctx)
+
+	if len(sKeys) == 0 {
+		logger.V(1).Info("no signing keys to update")
+		return nil
+	}
 
 	accJWTEncoded := string(jwtSecret.Data[v1alpha1.NatsSecretJWTKey])
 	accClaims, err := jwt.DecodeAccountClaims(accJWTEncoded)
@@ -412,7 +440,7 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc
 	}
 
 	if isSys, err := r.isSystemAccount(ctx, acc); err == nil && !isSys {
-		err = natsHelper.UpdateJWT(ctx, accClaims.Subject, ajwt)
+		err = nscHelper.UpdateJWT(ctx, accClaims.Subject, ajwt)
 		if err != nil {
 			logger.Error(err, "failed to update account jwt on nats server")
 			return err
