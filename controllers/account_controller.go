@@ -28,6 +28,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"go.uber.org/multierr"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -94,14 +95,9 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	defer func() {
 		if !equality.Semantic.DeepEqual(originalStatus, acc.Status) {
 			if err2 := r.Status().Update(ctx, acc); err2 != nil {
-				if errors.IsConflict(err2) {
-					result.RequeueAfter = time.Second * 30
+				logger.Info("failed to update account status", "error", err2.Error(), "account_name", acc.Name, "account_namespace", acc.Namespace)
 
-					err = nil
-					return
-				}
-
-				logger.Error(err, "failed to update account status")
+				err = multierr.Append(err, err2)
 			}
 		}
 	}()
@@ -110,10 +106,11 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	if err != nil {
 		if errors.IsNotFound(err) {
 			logger.V(1).Info("operator owner not found, requeuing")
-			result.RequeueAfter = time.Second * 30
-			return
+
+			return ctrl.Result{}, err
 		}
 		logger.V(1).Info("failed to ensure the operator owning the account was resolved")
+
 		return ctrl.Result{}, err
 	}
 
@@ -136,12 +133,12 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	ajwt, err := r.ensureSeedJWTSecrets(ctx, acc, sKeys, opSKey, &nscHelper)
 	if err != nil {
 		logger.V(1).Info("failed to ensure account jwt/secrets ready")
-		return ctrl.Result{RequeueAfter: time.Second * 30}, err
+		return ctrl.Result{}, err
 	}
 
 	if err := r.ensureJWTPushed(ctx, acc, ajwt, &nscHelper); err != nil {
 		logger.V(1).Info("failed to ensure account jwt was pushed, requeuing since the SYS account may not be ready")
-		return ctrl.Result{RequeueAfter: time.Second * 30}, err
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
@@ -174,7 +171,8 @@ func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *v1a
 	logger := log.FromContext(ctx)
 
 	skRef := acc.Spec.SigningKey.Ref
-	obj, err := r.Scheme.New(skRef.GetGroupVersionKind())
+	skGVK := skRef.GetGroupVersionKind()
+	obj, err := r.Scheme.New(skGVK)
 	if err != nil {
 		acc.Status.MarkOperatorResolveFailed(
 			v1alpha1.ReasonUnsupportedSigningKey, "unsupported GroupVersionKind: %s", err.Error())
@@ -185,24 +183,24 @@ func (r *AccountReconciler) ensureOperatorResolved(ctx context.Context, acc *v1a
 	signingKey, ok := obj.(client.Object)
 	if !ok {
 		acc.Status.MarkOperatorResolveFailed(
-			v1alpha1.ReasonUnsupportedSigningKey, "runtime.Object cannot be converted to client.Object", obj.GetObjectKind().GroupVersionKind())
+			v1alpha1.ReasonUnsupportedSigningKey, "runtime.Object cannot be converted to client.Object", skGVK)
 
 		return nil, fmt.Errorf("failed to cast runtime.Object to client.Object")
 	}
 
+	// signingKey.ref.namespace is optional, so default to the Account's namespace if not set
+	ns := skRef.Namespace
+	if ns == "" {
+		ns = acc.Namespace
+	}
+
 	err = r.Client.Get(ctx, client.ObjectKey{
-		Namespace: skRef.Namespace,
+		Namespace: ns,
 		Name:      skRef.Name,
 	}, signingKey)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			acc.Status.MarkOperatorResolveFailed(
-				v1alpha1.ReasonNotFound,
-				"%s, %s/%s: not found",
-				signingKey.GetObjectKind().GroupVersionKind(),
-				skRef.Namespace,
-				skRef.Name,
-			)
+			acc.Status.MarkOperatorResolveFailed(v1alpha1.ReasonNotFound, "%s, %s/%s: not found", skGVK, ns, skRef.Name)
 
 			return nil, err
 		}

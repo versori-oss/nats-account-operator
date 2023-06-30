@@ -28,8 +28,7 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"time"
-
+	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -85,16 +84,11 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 	originalStatus := usr.Status.DeepCopy()
 
 	defer func() {
-		if err != nil {
-			return
-		}
 		if !equality.Semantic.DeepEqual(originalStatus, usr.Status) {
-			if err = r.Status().Update(ctx, usr); err != nil {
-				if errors.IsConflict(err) {
-					result.RequeueAfter = time.Second * 5
-					return
-				}
-				logger.Error(err, "failed to update user status")
+			if err2 := r.Status().Update(ctx, usr); err2 != nil {
+				logger.Info("failed to update user status", "error", err2.Error())
+
+				err = multierr.Append(err, err2)
 			}
 		}
 	}()
@@ -117,7 +111,8 @@ func (r *UserReconciler) ensureAccountResolved(ctx context.Context, usr *v1alpha
 	// logger := log.FromContext(ctx)
 
 	skRef := usr.Spec.SigningKey.Ref
-	obj, err := r.Scheme.New(skRef.GetGroupVersionKind())
+	skGVK := skRef.GetGroupVersionKind()
+	obj, err := r.Scheme.New(skGVK)
 	if err != nil {
 		usr.Status.MarkAccountResolveFailed(
 			v1alpha1.ReasonUnsupportedSigningKey, "unsupported GroupVersionKind: %s", err.Error())
@@ -127,15 +122,20 @@ func (r *UserReconciler) ensureAccountResolved(ctx context.Context, usr *v1alpha
 	signingKey, ok := obj.(client.Object)
 	if !ok {
 		usr.Status.MarkAccountResolveFailed(
-			v1alpha1.ReasonUnsupportedSigningKey, "runtime.Object cannot be converted to client.Object", obj.GetObjectKind().GroupVersionKind())
+			v1alpha1.ReasonUnsupportedSigningKey, "runtime.Object cannot be converted to client.Object", skGVK)
 		return nil, err
 	}
 
-	err = r.Client.Get(ctx, client.ObjectKey{Namespace: skRef.Namespace, Name: skRef.Name}, signingKey)
+	ns := skRef.Namespace
+	if ns == "" {
+		ns = usr.Namespace
+	}
+
+	err = r.Client.Get(ctx, client.ObjectKey{Namespace: ns, Name: skRef.Name}, signingKey)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			usr.Status.MarkAccountResolveFailed(
-				v1alpha1.ReasonNotFound, "%s, %s/%s: not found", signingKey.GetObjectKind().GroupVersionKind(), skRef.Namespace, skRef.Name)
+				v1alpha1.ReasonNotFound, "%s, %s/%s: not found", skGVK, ns, skRef.Name)
 		}
 		return nil, err
 	}

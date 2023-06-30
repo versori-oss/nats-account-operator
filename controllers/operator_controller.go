@@ -27,6 +27,7 @@ package controllers
 
 import (
 	"context"
+	"go.uber.org/multierr"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -89,17 +90,11 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 	originalStatus := operator.Status.DeepCopy()
 
 	defer func() {
-		if err != nil {
-			return
-		}
 		if !equality.Semantic.DeepEqual(originalStatus, operator.Status) {
-			if err = r.Status().Update(ctx, operator); err != nil {
-				if errors.IsConflict(err) {
-					result.RequeueAfter = time.Second * 5
-					return
-				}
-				logger.Error(err, "failed to update operator status")
+			if err2 := r.Status().Update(ctx, operator); err2 != nil {
+				logger.Info("failed to update operator status", "error", err2.Error())
 
+				err = multierr.Append(err, err2)
 			}
 		}
 	}()

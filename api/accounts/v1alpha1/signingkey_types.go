@@ -76,6 +76,10 @@ func (s *SigningKeyStatus) SetConditions(conditions apis.Conditions) {
 //+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:name="Public Key",type=string,JSONPath=`.status.keyPair.publicKey`
+//+kubebuilder:printcolumn:name="Owner Kind",type=string,JSONPath=`.status.ownerRef.kind`
+//+kubebuilder:printcolumn:name="Owner",type=string,JSONPath=`.status.ownerRef.name`
+//+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 
 // SigningKey is the Schema for the signingkeys API
 type SigningKey struct {

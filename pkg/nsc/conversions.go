@@ -7,17 +7,57 @@ import (
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 
-func ConvertToNATSOperatorLimits(limits v1alpha1.AccountLimits) jwt.OperatorLimits {
-	return jwt.OperatorLimits{
-		Subs:            int64(limits.Subs),
-		Conn:            int64(limits.Conn),
-		LeafNodeConn:    int64(limits.Leaf),
-		Imports:         int64(limits.Imports),
-		Exports:         int64(limits.Exports),
-		Data:            int64(limits.Data),
-		Payload:         int64(limits.Payload),
-		WildcardExports: limits.Wildcards,
+var DefaultOperatorLimits = jwt.OperatorLimits{
+	Subs:            jwt.NoLimit,
+	Conn:            jwt.NoLimit,
+	LeafNodeConn:    jwt.NoLimit,
+	Imports:         jwt.NoLimit,
+	Exports:         jwt.NoLimit,
+	Data:            jwt.NoLimit,
+	Payload:         jwt.NoLimit,
+	WildcardExports: true,
+}
+
+func ConvertToNATSOperatorLimits(limits *v1alpha1.AccountLimits) jwt.OperatorLimits {
+	l := DefaultOperatorLimits
+
+	if limits == nil {
+		return l
 	}
+
+	if limits.Subs != l.Subs {
+		l.Subs = limits.Subs
+	}
+
+	if limits.Conn != l.Conn {
+		l.Conn = limits.Conn
+	}
+
+	if limits.Leaf != l.LeafNodeConn {
+		l.LeafNodeConn = limits.Leaf
+	}
+
+	if limits.Imports != l.Imports {
+		l.Imports = limits.Imports
+	}
+
+	if limits.Exports != l.Exports {
+		l.Exports = limits.Exports
+	}
+
+	if limits.Data != l.Data {
+		l.Data = limits.Data
+	}
+
+	if limits.Payload != l.Payload {
+		l.Payload = limits.Payload
+	}
+
+	if limits.Wildcards != l.WildcardExports {
+		l.WildcardExports = limits.Wildcards
+	}
+
+	return l
 }
 
 func ConvertTimeRanges(times []v1alpha1.StartEndTime) []jwt.TimeRange {

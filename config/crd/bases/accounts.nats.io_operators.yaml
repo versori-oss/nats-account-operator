@@ -15,7 +15,17 @@ spec:
     singular: operator
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.keyPair.publicKey
+      name: Public Key
+      type: string
+    - jsonPath: .status.resolvedSystemAccount.name
+      name: System Account
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Operator is the Schema for the operators API

@@ -15,7 +15,20 @@ spec:
     singular: signingkey
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.keyPair.publicKey
+      name: Public Key
+      type: string
+    - jsonPath: .status.ownerRef.kind
+      name: Owner Kind
+      type: string
+    - jsonPath: .status.ownerRef.name
+      name: Owner
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: SigningKey is the Schema for the signingkeys API

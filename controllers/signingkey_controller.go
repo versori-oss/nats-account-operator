@@ -45,7 +45,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/nats-io/nkeys"
-	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 )
 
@@ -75,7 +75,7 @@ func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	logger.V(1).Info("reconciling signing key", "name", req.Name)
 
-	signingKey := new(accountsnatsiov1alpha1.SigningKey)
+	signingKey := new(v1alpha1.SigningKey)
 	if err := r.Get(ctx, req.NamespacedName, signingKey); err != nil {
 		if errors.IsNotFound(err) {
 			logger.V(1).Info("signing key not found or not ready")
@@ -92,6 +92,7 @@ func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if !equality.Semantic.DeepEqual(originalStatus, signingKey.Status) {
 			if err2 := r.Status().Update(ctx, signingKey); err2 != nil {
 				logger.Error(err2, "failed to update signing key status")
+
 				err = multierr.Append(err, err2)
 			}
 		}
@@ -110,7 +111,7 @@ func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{}, nil
 }
 
-func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *accountsnatsiov1alpha1.SigningKey) error {
+func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *v1alpha1.SigningKey) error {
 	logger := log.FromContext(ctx)
 
 	var publicKey string
@@ -118,9 +119,9 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *ac
 	if errors.IsNotFound(err) {
 		var keyPair nkeys.KeyPair
 		switch signingKey.Spec.OwnerRef.Kind {
-		case accountsnatsiov1alpha1.SigningKeyTypeAccount:
+		case v1alpha1.SigningKeyTypeAccount:
 			keyPair, err = nkeys.CreateAccount()
-		case accountsnatsiov1alpha1.SigningKeyTypeOperator:
+		case v1alpha1.SigningKeyTypeOperator:
 			keyPair, err = nkeys.CreateOperator()
 		default:
 			err := errors.NewBadRequest(fmt.Sprintf("unknown owner kind: %s", signingKey.Spec.OwnerRef.Kind))
@@ -143,13 +144,13 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *ac
 		}
 
 		data := map[string][]byte{
-			accountsnatsiov1alpha1.NatsSecretSeedKey:      seed,
-			accountsnatsiov1alpha1.NatsSecretPublicKeyKey: []byte(publicKey),
+			v1alpha1.NatsSecretSeedKey:      seed,
+			v1alpha1.NatsSecretPublicKeyKey: []byte(publicKey),
 		}
 
 		labels := map[string]string{
 			"operator-name": signingKey.Spec.OwnerRef.Name,
-			"secret-type":   string(accountsnatsiov1alpha1.NatsSecretTypeSKey),
+			"secret-type":   string(v1alpha1.NatsSecretTypeSKey),
 		}
 
 		secret := NewSecret(signingKey.Spec.SeedSecretName, signingKey.Namespace, WithImmutable(true), WithLabels(labels), WithData(data))
@@ -168,7 +169,7 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *ac
 		logger.Error(err, "failed to fetch seed secret")
 		return err
 	} else {
-		publicKey = string(secret.Data[accountsnatsiov1alpha1.NatsSecretPublicKeyKey])
+		publicKey = string(secret.Data[v1alpha1.NatsSecretPublicKeyKey])
 	}
 
 	signingKey.Status.MarkSeedSecretReady(publicKey, signingKey.Spec.SeedSecretName)
@@ -176,14 +177,15 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *ac
 	return nil
 }
 
-func (r *SigningKeyReconciler) ensureOwnerResolved(ctx context.Context, signingKey *accountsnatsiov1alpha1.SigningKey) error {
+func (r *SigningKeyReconciler) ensureOwnerResolved(ctx context.Context, signingKey *v1alpha1.SigningKey) error {
 	logger := log.FromContext(ctx)
 
 	ownerRef := signingKey.Spec.OwnerRef
+	ownerGVK := schema.FromAPIVersionAndKind(ownerRef.APIVersion, ownerRef.Kind)
 
-	ownerRuntimeObj, _ := r.Scheme.New(schema.FromAPIVersionAndKind(ownerRef.APIVersion, ownerRef.Kind))
+	ownerRuntimeObj, _ := r.Scheme.New(ownerGVK)
 	switch ownerRuntimeObj.(type) {
-	case *accountsnatsiov1alpha1.Account, *accountsnatsiov1alpha1.Operator:
+	case *v1alpha1.Account, *v1alpha1.Operator:
 		break
 	default:
 		signingKey.Status.MarkOwnerResolveFailed("UnsupportedOwnerKind", "owner must be one of Account or Operator")
@@ -194,22 +196,25 @@ func (r *SigningKeyReconciler) ensureOwnerResolved(ctx context.Context, signingK
 	ownerObj := ownerRuntimeObj.(client.Object)
 
 	if err := r.Client.Get(ctx, types.NamespacedName{
+		// SigningKey owners must be in the same namespace as the SigningKey
 		Namespace: signingKey.Namespace,
 		Name:      ownerRef.Name,
 	}, ownerObj); err != nil {
 		if errors.IsNotFound(err) {
-			signingKey.Status.MarkOwnerResolveFailed("OwnerNotFound", "")
+			signingKey.Status.MarkOwnerResolveFailed(v1alpha1.ReasonNotFound, "%s, %s/%s: not found", ownerGVK, signingKey.Namespace, ownerRef.Name)
 
-			return nil
+			return err
 		}
 
-		logger.Info("failed to fetch signing key owner")
+		signingKey.Status.MarkOwnerResolveUnknown(v1alpha1.ReasonUnknownError, "failed to resolve owner reference: %s", err.Error())
+
+		logger.Info("failed to fetch signing key owner", "error", err.Error())
 
 		return err
 	}
 
 	ownerAPIVersion, ownerKind := ownerObj.GetObjectKind().GroupVersionKind().ToAPIVersionAndKind()
-	signingKey.Status.MarkOwnerResolved(accountsnatsiov1alpha1.TypedObjectReference{
+	signingKey.Status.MarkOwnerResolved(v1alpha1.TypedObjectReference{
 		APIVersion: ownerAPIVersion,
 		Kind:       ownerKind,
 		Name:       ownerObj.GetName(),
@@ -223,7 +228,7 @@ func (r *SigningKeyReconciler) ensureOwnerResolved(ctx context.Context, signingK
 // SetupWithManager sets up the controller with the Manager.
 func (r *SigningKeyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&accountsnatsiov1alpha1.SigningKey{}).
+		For(&v1alpha1.SigningKey{}).
 		Owns(&v1.Secret{}).
 		Complete(r)
 }

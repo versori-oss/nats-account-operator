@@ -107,6 +107,9 @@ func (s *UserStatus) SetConditions(conditions apis.Conditions) {
 //+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:name="Public Key",type=string,JSONPath=`.status.keyPair.publicKey`
+//+kubebuilder:printcolumn:name="Account",type=string,JSONPath=`.status.accountRef.name`
+//+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 
 // User is the Schema for the users API
 type User struct {

@@ -100,6 +100,9 @@ func (os *OperatorStatus) SetConditions(conditions apis.Conditions) {
 //+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:name="Public Key",type=string,JSONPath=`.status.keyPair.publicKey`
+//+kubebuilder:printcolumn:name="System Account",type=string,JSONPath=`.status.resolvedSystemAccount.name`
+//+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 
 // Operator is the Schema for the operators API
 type Operator struct {

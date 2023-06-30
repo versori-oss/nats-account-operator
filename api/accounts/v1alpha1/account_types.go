@@ -80,7 +80,7 @@ type AccountSpec struct {
 	Identities []Identity `json:"identities,omitempty"`
 
 	// Limits is a JWT claim for the Account.
-	Limits AccountLimits `json:"limits"`
+	Limits *AccountLimits `json:"limits"`
 }
 
 type AccountImport struct {
@@ -111,14 +111,14 @@ type AccountServiceLatency struct {
 }
 
 type AccountLimits struct {
-	Subs      int  `json:"subs"`
-	Conn      int  `json:"conn"`
-	Leaf      int  `json:"leaf"`
-	Imports   int  `json:"imports"`
-	Exports   int  `json:"exports"`
-	Data      int  `json:"data"`
-	Payload   int  `json:"payload"`
-	Wildcards bool `json:"wildcards"`
+	Subs      int64 `json:"subs"`
+	Conn      int64 `json:"conn"`
+	Leaf      int64 `json:"leaf"`
+	Imports   int64 `json:"imports"`
+	Exports   int64 `json:"exports"`
+	Data      int64 `json:"data"`
+	Payload   int64 `json:"payload"`
+	Wildcards bool  `json:"wildcards"`
 }
 
 // AccountStatus defines the observed state of Account
@@ -145,6 +145,9 @@ type OperatorRef struct {
 //+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:name="Public Key",type=string,JSONPath=`.status.keyPair.publicKey`
+//+kubebuilder:printcolumn:name="Operator",type=string,JSONPath=`.status.operatorRef.name`
+//+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 
 // Account is the Schema for the accounts API
 type Account struct {
