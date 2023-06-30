@@ -1,5 +1,5 @@
 /*
- * Copyright 2018-2019 The NATS Authors
+ * Copyright 2018-2022 The NATS Authors
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/nats-io/nkeys"
@@ -32,22 +31,42 @@ import (
 type ClaimType string
 
 const (
+	// OperatorClaim is the type of an operator JWT
+	OperatorClaim = "operator"
 	// AccountClaim is the type of an Account JWT
 	AccountClaim = "account"
-	//ActivationClaim is the type of an activation JWT
-	ActivationClaim = "activation"
-	//UserClaim is the type of an user JWT
+	// UserClaim is the type of an user JWT
 	UserClaim = "user"
-	//OperatorClaim is the type of an operator JWT
-	OperatorClaim = "operator"
-
-	//ServerClaim is the type of an server JWT
-	// Deprecated: ServerClaim is not supported
-	ServerClaim = "server"
-	// ClusterClaim is the type of an cluster JWT
-	// Deprecated: ClusterClaim is not supported
-	ClusterClaim = "cluster"
+	// ActivationClaim is the type of an activation JWT
+	ActivationClaim = "activation"
+	// AuthorizationRequestClaim is the type of an auth request claim JWT
+	AuthorizationRequestClaim = "authorization_request"
+	// AuthorizationResponseClaim is the response for an auth request
+	AuthorizationResponseClaim = "authorization_response"
+	// GenericClaim is a type that doesn't match Operator/Account/User/ActionClaim
+	GenericClaim = "generic"
 )
+
+func IsGenericClaimType(s string) bool {
+	switch s {
+	case OperatorClaim:
+		fallthrough
+	case AccountClaim:
+		fallthrough
+	case UserClaim:
+		fallthrough
+	case AuthorizationRequestClaim:
+		fallthrough
+	case AuthorizationResponseClaim:
+		fallthrough
+	case ActivationClaim:
+		return false
+	case GenericClaim:
+		return true
+	default:
+		return true
+	}
+}
 
 // Claims is a JWT claims
 type Claims interface {
@@ -57,21 +76,28 @@ type Claims interface {
 	Payload() interface{}
 	String() string
 	Validate(vr *ValidationResults)
-	Verify(payload string, sig []byte) bool
+	ClaimType() ClaimType
+
+	verify(payload string, sig []byte) bool
+	updateVersion()
+}
+
+type GenericFields struct {
+	Tags    TagList   `json:"tags,omitempty"`
+	Type    ClaimType `json:"type,omitempty"`
+	Version int       `json:"version,omitempty"`
 }
 
 // ClaimsData is the base struct for all claims
 type ClaimsData struct {
-	Audience  string    `json:"aud,omitempty"`
-	Expires   int64     `json:"exp,omitempty"`
-	ID        string    `json:"jti,omitempty"`
-	IssuedAt  int64     `json:"iat,omitempty"`
-	Issuer    string    `json:"iss,omitempty"`
-	Name      string    `json:"name,omitempty"`
-	NotBefore int64     `json:"nbf,omitempty"`
-	Subject   string    `json:"sub,omitempty"`
-	Tags      TagList   `json:"tags,omitempty"`
-	Type      ClaimType `json:"type,omitempty"`
+	Audience  string `json:"aud,omitempty"`
+	Expires   int64  `json:"exp,omitempty"`
+	ID        string `json:"jti,omitempty"`
+	IssuedAt  int64  `json:"iat,omitempty"`
+	Issuer    string `json:"iss,omitempty"`
+	Name      string `json:"name,omitempty"`
+	NotBefore int64  `json:"nbf,omitempty"`
+	Subject   string `json:"sub,omitempty"`
 }
 
 // Prefix holds the prefix byte for an NKey
@@ -102,6 +128,10 @@ func (c *ClaimsData) doEncode(header *Header, kp nkeys.KeyPair, claim Claims) (s
 
 	if kp == nil {
 		return "", errors.New("keypair is required")
+	}
+
+	if c != claim.Claims() {
+		return "", errors.New("claim and claim data do not match")
 	}
 
 	if c.Subject == "" {
@@ -150,25 +180,36 @@ func (c *ClaimsData) doEncode(header *Header, kp nkeys.KeyPair, claim Claims) (s
 		}
 	}
 
-	c.Issuer = string(issuerBytes)
+	c.Issuer = issuerBytes
 	c.IssuedAt = time.Now().UTC().Unix()
-
+	c.ID = "" // to create a repeatable hash
 	c.ID, err = c.hash()
 	if err != nil {
 		return "", err
 	}
+
+	claim.updateVersion()
 
 	payload, err := serialize(claim)
 	if err != nil {
 		return "", err
 	}
 
-	sig, err := kp.Sign([]byte(payload))
-	if err != nil {
-		return "", err
+	toSign := fmt.Sprintf("%s.%s", h, payload)
+	eSig := ""
+	if header.Algorithm == AlgorithmNkeyOld {
+		return "", errors.New(AlgorithmNkeyOld + " not supported to write jwtV2")
+	} else if header.Algorithm == AlgorithmNkey {
+		sig, err := kp.Sign([]byte(toSign))
+		if err != nil {
+			return "", err
+		}
+		eSig = encodeToString(sig)
+	} else {
+		return "", errors.New(header.Algorithm + " not supported to write jwtV2")
 	}
-	eSig := encodeToString(sig)
-	return fmt.Sprintf("%s.%s.%s", h, payload, eSig), nil
+	// hash need no padding
+	return fmt.Sprintf("%s.%s", toSign, eSig), nil
 }
 
 func (c *ClaimsData) hash() (string, error) {
@@ -183,7 +224,7 @@ func (c *ClaimsData) hash() (string, error) {
 
 // Encode encodes a claim into a JWT token. The claim is signed with the
 // provided nkey's private key
-func (c *ClaimsData) Encode(kp nkeys.KeyPair, payload Claims) (string, error) {
+func (c *ClaimsData) encode(kp nkeys.KeyPair, payload Claims) (string, error) {
 	return c.doEncode(&Header{TokenTypeJwt, AlgorithmNkey}, kp, payload)
 }
 
@@ -209,7 +250,7 @@ func parseClaims(s string, target Claims) error {
 // the claims portion of the token and the public key in the claim.
 // Client code need to insure that the public key in the
 // claim is trusted.
-func (c *ClaimsData) Verify(payload string, sig []byte) bool {
+func (c *ClaimsData) verify(payload string, sig []byte) bool {
 	// decode the public key
 	kp, err := nkeys.FromPublicKey(c.Issuer)
 	if err != nil {
@@ -237,69 +278,4 @@ func (c *ClaimsData) Validate(vr *ValidationResults) {
 // IsSelfSigned returns true if the claims issuer is the subject
 func (c *ClaimsData) IsSelfSigned() bool {
 	return c.Issuer == c.Subject
-}
-
-// Decode takes a JWT string decodes it and validates it
-// and return the embedded Claims. If the token header
-// doesn't match the expected algorithm, or the claim is
-// not valid or verification fails an error is returned.
-func Decode(token string, target Claims) error {
-	// must have 3 chunks
-	chunks := strings.Split(token, ".")
-	if len(chunks) != 3 {
-		return errors.New("expected 3 chunks")
-	}
-
-	_, err := parseHeaders(chunks[0])
-	if err != nil {
-		return err
-	}
-
-	if err := parseClaims(chunks[1], target); err != nil {
-		return err
-	}
-
-	sig, err := decodeString(chunks[2])
-	if err != nil {
-		return err
-	}
-
-	if !target.Verify(chunks[1], sig) {
-		return errors.New("claim failed signature verification")
-	}
-
-	prefixes := target.ExpectedPrefixes()
-	if prefixes != nil {
-		ok := false
-		issuer := target.Claims().Issuer
-		for _, p := range prefixes {
-			switch p {
-			case nkeys.PrefixByteAccount:
-				if nkeys.IsValidPublicAccountKey(issuer) {
-					ok = true
-				}
-			case nkeys.PrefixByteOperator:
-				if nkeys.IsValidPublicOperatorKey(issuer) {
-					ok = true
-				}
-			case nkeys.PrefixByteServer:
-				if nkeys.IsValidPublicServerKey(issuer) {
-					ok = true
-				}
-			case nkeys.PrefixByteCluster:
-				if nkeys.IsValidPublicClusterKey(issuer) {
-					ok = true
-				}
-			case nkeys.PrefixByteUser:
-				if nkeys.IsValidPublicUserKey(issuer) {
-					ok = true
-				}
-			}
-		}
-		if !ok {
-			return fmt.Errorf("unable to validate expected prefixes - %v", prefixes)
-		}
-	}
-
-	return nil
 }
