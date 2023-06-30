@@ -3,19 +3,46 @@ package nsc
 import (
 	"time"
 
-	"github.com/nats-io/jwt"
+	"github.com/nats-io/jwt/v2"
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 
 var DefaultOperatorLimits = jwt.OperatorLimits{
-	Subs:            jwt.NoLimit,
-	Conn:            jwt.NoLimit,
-	LeafNodeConn:    jwt.NoLimit,
-	Imports:         jwt.NoLimit,
-	Exports:         jwt.NoLimit,
-	Data:            jwt.NoLimit,
-	Payload:         jwt.NoLimit,
-	WildcardExports: true,
+	NatsLimits: jwt.NatsLimits{
+		Subs:    jwt.NoLimit,
+		Data:    jwt.NoLimit,
+		Payload: jwt.NoLimit,
+	},
+	AccountLimits: jwt.AccountLimits{
+		Imports:         jwt.NoLimit,
+		Exports:         jwt.NoLimit,
+		WildcardExports: true,
+		DisallowBearer:  false,
+		Conn:            jwt.NoLimit,
+		LeafNodeConn:    jwt.NoLimit,
+	},
+	JetStreamLimits: jwt.JetStreamLimits{
+		MemoryStorage:        jwt.NoLimit,
+		DiskStorage:          jwt.NoLimit,
+		Streams:              jwt.NoLimit,
+		Consumer:             jwt.NoLimit,
+		MaxAckPending:        jwt.NoLimit,
+		MemoryMaxStreamBytes: jwt.NoLimit,
+		DiskMaxStreamBytes:   jwt.NoLimit,
+		MaxBytesRequired:     false,
+	},
+	JetStreamTieredLimits: map[string]jwt.JetStreamLimits{
+		"": {
+			MemoryStorage:        jwt.NoLimit,
+			DiskStorage:          jwt.NoLimit,
+			Streams:              jwt.NoLimit,
+			Consumer:             jwt.NoLimit,
+			MaxAckPending:        jwt.NoLimit,
+			MemoryMaxStreamBytes: jwt.NoLimit,
+			DiskMaxStreamBytes:   jwt.NoLimit,
+			MaxBytesRequired:     false,
+		},
+	},
 }
 
 func ConvertToNATSOperatorLimits(limits *v1alpha1.AccountLimits) jwt.OperatorLimits {
@@ -74,21 +101,29 @@ func ConvertTimeRanges(times []v1alpha1.StartEndTime) []jwt.TimeRange {
 	return result
 }
 
+func ConvertToNATSSigningKeys(keys []string) jwt.SigningKeys {
+	var result jwt.SigningKeys
+	result.Add(keys...)
+	return result
+}
+
 func ConvertToNATSLimits(limits v1alpha1.UserLimits) jwt.Limits {
-	jwtLimits := jwt.Limits{
-		Max:     int64(limits.Max),
-		Payload: int64(limits.Payload),
+	natslimits := jwt.NatsLimits{
+		Subs:    0,
+		Data:    limits.Max,
+		Payload: limits.Payload,
 	}
 
-	if limits.Src != nil {
-		jwtLimits.Src = *limits.Src
+	usrLimits := jwt.UserLimits{
+		Src:    jwt.CIDRList(limits.Src),
+		Times:  ConvertTimeRanges(limits.Times),
+		Locale: "",
 	}
 
-	if limits.Times != nil {
-		jwtLimits.Times = ConvertTimeRanges(*limits.Times)
+	return jwt.Limits{
+		UserLimits: usrLimits,
+		NatsLimits: natslimits,
 	}
-
-	return jwtLimits
 }
 
 func ConvertToNATSExportType(ieType v1alpha1.ImportExportType) jwt.ExportType {
@@ -108,7 +143,7 @@ func ConvertToNATSServiceLatency(latency *v1alpha1.AccountServiceLatency) *jwt.S
 		return nil
 	}
 	return &jwt.ServiceLatency{
-		Sampling: latency.Sampling,
+		Sampling: jwt.SamplingRate(latency.Sampling),
 		Results:  jwt.Subject(latency.Results),
 	}
 }
@@ -163,17 +198,6 @@ func ConvertToNATSResponseType(responseType v1alpha1.ResponseType) jwt.ResponseT
 	default:
 		return ""
 	}
-}
-
-func ConvertToNATSIdentities(idents []v1alpha1.Identity) []jwt.Identity {
-	result := make([]jwt.Identity, len(idents))
-	for n, ident := range idents {
-		result[n] = jwt.Identity{
-			ID:    ident.ID,
-			Proof: ident.Proof,
-		}
-	}
-	return result
 }
 
 func ConvertToNATSUserPermissions(permissions v1alpha1.UserPermissions) jwt.Permissions {

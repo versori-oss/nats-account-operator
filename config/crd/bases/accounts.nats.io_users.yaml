@@ -60,12 +60,16 @@ spec:
                 description: Limits is a JWT claim for the User.
                 properties:
                   max:
+                    format: int64
                     type: integer
                   payload:
+                    format: int64
                     type: integer
                   src:
-                    description: Src is a comma-separated list of CIDR blocks
-                    type: string
+                    description: Src is a list of CIDR blocks
+                    items:
+                      type: string
+                    type: array
                   times:
                     description: Times is a list of start/end times in the format
                       "15:04:05".

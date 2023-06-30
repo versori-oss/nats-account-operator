@@ -28,6 +28,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -39,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/nats-io/jwt"
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/pkg/apis"
@@ -225,12 +226,21 @@ func (r *UserReconciler) ensureCredsSecrets(ctx context.Context, usr *v1alpha1.U
 		}
 
 		usrClaims := jwt.User{
-			Permissions: nsc.ConvertToNATSUserPermissions(usr.Spec.Permissions),
-			Limits:      nsc.ConvertToNATSLimits(usr.Spec.Limits),
-			BearerToken: usr.Spec.BearerToken,
+			UserPermissionLimits: jwt.UserPermissionLimits{
+				Permissions:            nsc.ConvertToNATSUserPermissions(usr.Spec.Permissions),
+				Limits:                 nsc.ConvertToNATSLimits(usr.Spec.Limits),
+				BearerToken:            usr.Spec.BearerToken,
+				AllowedConnectionTypes: []string{},
+			},
+			IssuerAccount: keyPair.PublicKey,
+			GenericFields: jwt.GenericFields{
+				Tags:    []string{},
+				Type:    "",
+				Version: 0,
+			},
 		}
 
-		ujwt, publicKey, seed, err := nsc.CreateUser(usr.Name, usrClaims, kPair, keyPair.PublicKey)
+		ujwt, publicKey, seed, err := nsc.CreateUser(usr.Name, usrClaims, kPair)
 		if err != nil {
 			logger.Error(err, "failed to create user jwt")
 			return err

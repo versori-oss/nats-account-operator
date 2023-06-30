@@ -27,8 +27,9 @@ package controllers
 
 import (
 	"context"
-	"go.uber.org/multierr"
 	"time"
+
+	"go.uber.org/multierr"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -46,11 +47,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/nats-io/jwt"
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
-	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 // OperatorReconciler reconciles a Operator object
@@ -215,7 +215,6 @@ func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *v1al
 	jwtSec, err := r.CV1Interface.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		op := jwt.Operator{
-			Identities:          nsc.ConvertToNATSIdentities(operator.Spec.Identities),
 			SigningKeys:         sKeysPublicKeys,
 			AccountServerURL:    operator.Spec.AccountServerURL,
 			OperatorServiceURLs: operator.Spec.OperatorServiceURLs,

@@ -28,8 +28,9 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"go.uber.org/multierr"
 	"time"
+
+	"go.uber.org/multierr"
 
 	v1 "k8s.io/api/core/v1"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -46,7 +47,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/nats-io/jwt"
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 	v1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/pkg/apis"
@@ -287,11 +288,46 @@ func (r *AccountReconciler) ensureSeedJWTSecrets(ctx context.Context, acc *v1alp
 
 	if errors.IsNotFound(errSeed) || errors.IsNotFound(errJWT) {
 		accClaims := jwt.Account{
-			Imports:     nsc.ConvertToNATSImports(acc.Spec.Imports),
-			Exports:     nsc.ConvertToNATSExports(acc.Spec.Exports),
-			Identities:  nsc.ConvertToNATSIdentities(acc.Spec.Identities),
-			Limits:      nsc.ConvertToNATSOperatorLimits(acc.Spec.Limits),
-			SigningKeys: sKeysPublicKeys,
+			Imports: []*jwt.Import{},
+			Exports: []*jwt.Export{},
+			Limits:  nsc.ConvertToNATSOperatorLimits(acc.Spec.Limits),
+			SigningKeys: map[string]jwt.Scope{
+				"": nil,
+			},
+			Revocations: map[string]int64{
+				"": 0,
+			},
+			DefaultPermissions: jwt.Permissions{
+				Pub: jwt.Permission{
+					Allow: []string{},
+					Deny:  []string{},
+				},
+				Sub: jwt.Permission{
+					Allow: []string{},
+					Deny:  []string{},
+				},
+				Resp: &jwt.ResponsePermission{
+					MaxMsgs: 0,
+					Expires: 0,
+				},
+			},
+			Mappings: map[jwt.Subject][]jwt.WeightedMapping{
+				"": {},
+			},
+			Authorization: jwt.ExternalAuthorization{
+				AuthUsers:       []string{},
+				AllowedAccounts: []string{},
+				XKey:            "",
+			},
+			Info: jwt.Info{
+				Description: "",
+				InfoURL:     "",
+			},
+			GenericFields: jwt.GenericFields{
+				Tags:    []string{},
+				Type:    "",
+				Version: 0,
+			},
 		}
 
 		kPair, err := nkeys.ParseDecoratedNKey(opSkey)
@@ -412,12 +448,12 @@ func (r *AccountReconciler) updateAccountJWTSigningKeys(ctx context.Context, acc
 		return err
 	}
 
-	if isEqualUnordered(accClaims.SigningKeys, sKeys) {
+	if isEqualUnordered(accClaims.SigningKeys.Keys(), sKeys) {
 		logger.V(1).Info("account jwt signing keys are already up to date")
 		return nil
 	}
 
-	accClaims.SigningKeys = jwt.StringList(sKeys)
+	accClaims.SigningKeys = nsc.ConvertToNATSSigningKeys(sKeys)
 
 	kPair, err := nkeys.ParseDecoratedNKey(operatorSeed)
 	if err != nil {

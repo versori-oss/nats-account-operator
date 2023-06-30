@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nats-io/jwt"
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 	"k8s.io/apimachinery/pkg/api/errors"
 )
@@ -18,7 +18,7 @@ func ExpiresAt(t time.Time) ClaimOption {
 	}
 }
 
-func CreateUser(name string, payload jwt.User, signingKey nkeys.KeyPair, accPublicKey string, opts ...ClaimOption) (ujwt string, pubKey string, seed []byte, err error) {
+func CreateUser(name string, payload jwt.User, signingKey nkeys.KeyPair, opts ...ClaimOption) (ujwt string, pubKey string, seed []byte, err error) {
 	kp, err := nkeys.CreateUser()
 	if err != nil {
 		return "", "", nil, err
@@ -38,8 +38,6 @@ func CreateUser(name string, payload jwt.User, signingKey nkeys.KeyPair, accPubl
 
 	claims.User = payload
 	claims.Name = name
-
-	claims.IssuerAccount = accPublicKey
 
 	for _, fn := range opts {
 		if err = fn(&claims.ClaimsData); err != nil {

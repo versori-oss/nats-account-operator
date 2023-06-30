@@ -58,9 +58,6 @@ type OperatorSpec struct {
 	// in the same namespace as the Operator, the AccountsNamespaceSelector and AccountsSelector are ignored.
 	SystemAccountRef v1.LocalObjectReference `json:"systemAccountRef"`
 
-	// Identities is a JWT claim for the Operator
-	Identities []Identity `json:"identities,omitempty"`
-
 	// AccountServerURL is a JWT claim for the Operator
 	AccountServerURL string `json:"accountServerURL,omitempty"`
 

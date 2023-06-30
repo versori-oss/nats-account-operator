@@ -132,18 +132,25 @@ spec:
                 description: Limits is a JWT claim for the Account.
                 properties:
                   conn:
+                    format: int64
                     type: integer
                   data:
+                    format: int64
                     type: integer
                   exports:
+                    format: int64
                     type: integer
                   imports:
+                    format: int64
                     type: integer
                   leaf:
+                    format: int64
                     type: integer
                   payload:
+                    format: int64
                     type: integer
                   subs:
+                    format: int64
                     type: integer
                   wildcards:
                     type: boolean

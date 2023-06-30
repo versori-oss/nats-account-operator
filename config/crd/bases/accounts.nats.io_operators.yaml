@@ -144,19 +144,6 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
-              identities:
-                description: Identities is a JWT claim for the Operator
-                items:
-                  properties:
-                    id:
-                      type: string
-                    proof:
-                      type: string
-                  required:
-                  - id
-                  - proof
-                  type: object
-                type: array
               jwtSecretName:
                 description: JWTSecretName is the name of the secret containing the
                   self-signed Operator JWT.
