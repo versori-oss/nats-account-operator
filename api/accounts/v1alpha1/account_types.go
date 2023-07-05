@@ -26,7 +26,6 @@ SOFTWARE.
 package v1alpha1
 
 import (
-	"github.com/versori-oss/nats-account-operator/pkg/apis"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -50,7 +49,7 @@ type AccountSpec struct {
 	// SigningKey is the reference to the SigningKey that will be used to sign JWTs for this Account. The controller
 	// will check the owner of the SigningKey is an Operator, and that this Account can be managed by that Operator
 	// following its namespace and label selector restrictions.
-	SigningKey SigningKeyReference `json:"signingKey"`
+	Issuer IssuerReference `json:"issuer"`
 
 	// UsersNamespaceSelector defines which namespaces are allowed to contain Users managed by this Account. The default
 	// restricts to the same namespace as the Account, it can be set to an empty selector `{}` to allow all namespaces.
@@ -76,11 +75,8 @@ type AccountSpec struct {
 	// Exports is a JWT claim for the Account.
 	Exports []AccountExport `json:"exports,omitempty"`
 
-	// Identities is a JWT claim for the Account.
-	Identities []Identity `json:"identities,omitempty"`
-
 	// Limits is a JWT claim for the Account.
-	Limits *AccountLimits `json:"limits"`
+	Limits *OperatorLimits `json:"limits,omitempty"`
 }
 
 type AccountImport struct {
@@ -110,31 +106,46 @@ type AccountServiceLatency struct {
 	Results  string `json:"results"`
 }
 
+// OperatorLimits are used to limit access by an account
+type OperatorLimits struct {
+	Nats      NatsLimits      `json:"nats,omitempty"`
+	Account   AccountLimits   `json:"account,omitempty"`
+	JetStream JetStreamLimits `json:"jetStream,omitempty"`
+}
+
+type NatsLimits struct {
+	Subs    *int64 `json:"subs,omitempty"`    // Max number of subscriptions
+	Data    *int64 `json:"data,omitempty"`    // Max number of bytes
+	Payload *int64 `json:"payload,omitempty"` // Max message payload
+}
+
 type AccountLimits struct {
-	Subs      int64 `json:"subs"`
-	Conn      int64 `json:"conn"`
-	Leaf      int64 `json:"leaf"`
-	Imports   int64 `json:"imports"`
-	Exports   int64 `json:"exports"`
-	Data      int64 `json:"data"`
-	Payload   int64 `json:"payload"`
-	Wildcards bool  `json:"wildcards"`
+	Imports         *int64 `json:"imports,omitempty"`        // Max number of imports
+	Exports         *int64 `json:"exports,omitempty"`        // Max number of exports
+	WildcardExports *bool  `json:"wildcards,omitempty"`      // Are wildcards allowed in exports
+	DisallowBearer  bool   `json:"disallowBearer,omitempty"` // User JWT can't be bearer token
+	Conn            *int64 `json:"conn,omitempty"`           // Max number of active connections
+	LeafNodeConn    *int64 `json:"leaf,omitempty"`           // Max number of active leaf node connections
+}
+
+type JetStreamLimits struct {
+	MemoryStorage        int64 `json:"memoryStorage,omitempty"`        // Max number of bytes stored in memory across all streams. (0 means disabled)
+	DiskStorage          int64 `json:"diskStorage,omitempty"`          // Max number of bytes stored on disk across all streams. (0 means disabled)
+	Streams              int64 `json:"streams,omitempty"`              // Max number of streams
+	Consumer             int64 `json:"consumer,omitempty"`             // Max number of consumers
+	MaxAckPending        int64 `json:"maxAckPending,omitempty"`        // Max ack pending of a Stream
+	MemoryMaxStreamBytes int64 `json:"memoryMaxStreamBytes,omitempty"` // Max bytes a memory backed stream can have. (0 means disabled/unlimited)
+	DiskMaxStreamBytes   int64 `json:"diskMaxStreamBytes,omitempty"`   // Max bytes a disk backed stream can have. (0 means disabled/unlimited)
+	MaxBytesRequired     bool  `json:"maxBytesRequired,omitempty"`     // Max bytes required by all Streams
 }
 
 // AccountStatus defines the observed state of Account
 type AccountStatus struct {
+	Status `json:",inline"`
+
 	KeyPair     *KeyPair                   `json:"keyPair,omitempty"`
 	SigningKeys []SigningKeyEmbeddedStatus `json:"signingKeys,omitempty"`
 	OperatorRef *InferredObjectReference   `json:"operatorRef,omitempty"`
-	Conditions  apis.Conditions            `json:"conditions,omitempty"`
-}
-
-func (s *AccountStatus) GetConditions() apis.Conditions {
-	return s.Conditions
-}
-
-func (s *AccountStatus) SetConditions(conditions apis.Conditions) {
-	s.Conditions = conditions
 }
 
 type OperatorRef struct {
@@ -156,6 +167,12 @@ type Account struct {
 
 	Spec   AccountSpec   `json:"spec,omitempty"`
 	Status AccountStatus `json:"status,omitempty"`
+}
+
+var _ KeyPairable = (*Account)(nil)
+
+func (a *Account) GetStatus() *Status {
+	return &a.Status.Status
 }
 
 func (a *Account) GetKeyPair() *KeyPair {

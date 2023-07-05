@@ -30,7 +30,7 @@ spec:
       proof: some_string
   jwtSecretName: operator-jwt-secret # This is the name of the secret that will be created by the operator
   operatorServiceURLs:
-    - some_string
+    - nats://localhost:4222
   seedSecretName: operator-seed-secret
   signingKeysSelector:
     matchExpressions:

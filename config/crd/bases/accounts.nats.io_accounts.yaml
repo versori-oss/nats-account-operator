@@ -86,19 +86,6 @@ spec:
                   - type
                   type: object
                 type: array
-              identities:
-                description: Identities is a JWT claim for the Account.
-                items:
-                  properties:
-                    id:
-                      type: string
-                    proof:
-                      type: string
-                  required:
-                  - id
-                  - proof
-                  type: object
-                type: array
               imports:
                 description: Imports is a JWT claim for the Account.
                 items:
@@ -124,51 +111,7 @@ spec:
                   - type
                   type: object
                 type: array
-              jwtSecretName:
-                description: JWTSecretName is the name of the Secret that will be
-                  created to hold the JWT signing key for this Account.
-                type: string
-              limits:
-                description: Limits is a JWT claim for the Account.
-                properties:
-                  conn:
-                    format: int64
-                    type: integer
-                  data:
-                    format: int64
-                    type: integer
-                  exports:
-                    format: int64
-                    type: integer
-                  imports:
-                    format: int64
-                    type: integer
-                  leaf:
-                    format: int64
-                    type: integer
-                  payload:
-                    format: int64
-                    type: integer
-                  subs:
-                    format: int64
-                    type: integer
-                  wildcards:
-                    type: boolean
-                required:
-                - conn
-                - data
-                - exports
-                - imports
-                - leaf
-                - payload
-                - subs
-                - wildcards
-                type: object
-              seedSecretName:
-                description: SeedSecretName is the name of the Secret that will be
-                  created to hold the seed for this Account.
-                type: string
-              signingKey:
+              issuer:
                 description: SigningKey is the reference to the SigningKey that will
                   be used to sign JWTs for this Account. The controller will check
                   the owner of the SigningKey is an Operator, and that this Account
@@ -199,6 +142,75 @@ spec:
                 required:
                 - ref
                 type: object
+              jwtSecretName:
+                description: JWTSecretName is the name of the Secret that will be
+                  created to hold the JWT signing key for this Account.
+                type: string
+              limits:
+                description: Limits is a JWT claim for the Account.
+                properties:
+                  account:
+                    properties:
+                      conn:
+                        format: int64
+                        type: integer
+                      disallowBearer:
+                        type: boolean
+                      exports:
+                        format: int64
+                        type: integer
+                      imports:
+                        format: int64
+                        type: integer
+                      leaf:
+                        format: int64
+                        type: integer
+                      wildcards:
+                        type: boolean
+                    type: object
+                  jetStream:
+                    properties:
+                      consumer:
+                        format: int64
+                        type: integer
+                      diskMaxStreamBytes:
+                        format: int64
+                        type: integer
+                      diskStorage:
+                        format: int64
+                        type: integer
+                      maxAckPending:
+                        format: int64
+                        type: integer
+                      maxBytesRequired:
+                        type: boolean
+                      memoryMaxStreamBytes:
+                        format: int64
+                        type: integer
+                      memoryStorage:
+                        format: int64
+                        type: integer
+                      streams:
+                        format: int64
+                        type: integer
+                    type: object
+                  nats:
+                    properties:
+                      data:
+                        format: int64
+                        type: integer
+                      payload:
+                        format: int64
+                        type: integer
+                      subs:
+                        format: int64
+                        type: integer
+                    type: object
+                type: object
+              seedSecretName:
+                description: SeedSecretName is the name of the Secret that will be
+                  created to hold the seed for this Account.
+                type: string
               signingKeysSelector:
                 description: SigningKeysSelector is the label selector to restrict
                   which SigningKeys can be used to sign JWTs for this Account. SigningKeys
@@ -343,17 +355,16 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
             required:
+            - issuer
             - jwtSecretName
-            - limits
             - seedSecretName
-            - signingKey
             type: object
           status:
             description: AccountStatus defines the observed state of Account
             properties:
               conditions:
-                description: Conditions is the schema for the conditions portion of
-                  the payload
+                description: Conditions the latest available observations of a resource's
+                  current state.
                 items:
                   description: 'Condition defines a readiness condition for a Knative
                     resource. See: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties'
@@ -387,6 +398,8 @@ spec:
                   type: object
                 type: array
               keyPair:
+                description: KeyPair is the reference to the KeyPair that will be
+                  used to sign JWTs for Accounts and Users.
                 properties:
                   publicKey:
                     type: string
@@ -412,6 +425,8 @@ spec:
                 items:
                   properties:
                     keyPair:
+                      description: KeyPair is the reference to the KeyPair that will
+                        be used to sign JWTs for Accounts and Users.
                       properties:
                         publicKey:
                           type: string

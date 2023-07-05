@@ -5,27 +5,24 @@ import "github.com/versori-oss/nats-account-operator/pkg/apis"
 const (
 	AccountConditionReady              = apis.ConditionReady
 	AccountConditionOperatorResolved   = "OperatorResolved"
+	AccountConditionIssuerResolved     = "IssuerResolved"
 	AccountConditionSigningKeysUpdated = "SigningKeysUpdated"
 	AccountConditionJWTSecretReady     = "JWTSecretReady"
-	AccountConditionSeedSecretReady    = "SeedSecretReady"
 	AccountConditionJWTPushed          = "JWTPushed"
 )
 
 var accountConditionSet = apis.NewLivingConditionSet(
 	AccountConditionReady,
+	KeyPairableConditionSeedSecretReady,
 	AccountConditionOperatorResolved,
+	AccountConditionIssuerResolved,
 	AccountConditionSigningKeysUpdated,
 	AccountConditionJWTSecretReady,
-	AccountConditionSeedSecretReady,
 	AccountConditionJWTPushed,
 )
 
 func (*Account) GetConditionSet() apis.ConditionSet {
 	return accountConditionSet
-}
-
-func (a *Account) GetConditionManager() apis.ConditionManager {
-	return accountConditionSet.Manage(&a.Status)
 }
 
 // GetCondition returns the condition currently associated with the given type, or nil.
@@ -59,6 +56,18 @@ func (s *AccountStatus) MarkOperatorResolveUnknown(reason, messageFormat string,
 	s.OperatorRef = nil
 
 	accountConditionSet.Manage(s).MarkUnknown(AccountConditionOperatorResolved, reason, messageFormat, messageA...)
+}
+
+func (s *AccountStatus) MarkIssuerResolved() {
+	accountConditionSet.Manage(s).MarkTrue(AccountConditionIssuerResolved)
+}
+
+func (s *AccountStatus) MarkIssuerResolveFailed(reason, messageFormat string, messageA ...interface{}) {
+	accountConditionSet.Manage(s).MarkFalse(AccountConditionIssuerResolved, reason, messageFormat, messageA...)
+}
+
+func (s *AccountStatus) MarkIssuerResolveUnknown(reason, messageFormat string, messageA ...interface{}) {
+	accountConditionSet.Manage(s).MarkUnknown(AccountConditionIssuerResolved, reason, messageFormat, messageA...)
 }
 
 func (s *AccountStatus) MarkSigningKeysUpdated(signingKeys []SigningKeyEmbeddedStatus) {
@@ -97,19 +106,19 @@ func (s *AccountStatus) MarkSeedSecretReady(publicKey, seedSecretName string) {
 		SeedSecretName: seedSecretName,
 	}
 
-	accountConditionSet.Manage(s).MarkTrue(AccountConditionSeedSecretReady)
+	accountConditionSet.Manage(s).MarkTrue(KeyPairableConditionSeedSecretReady)
 }
 
 func (s *AccountStatus) MarkSeedSecretFailed(reason, messageFormat string, messageA ...interface{}) {
 	s.KeyPair = nil
 
-	accountConditionSet.Manage(s).MarkFalse(AccountConditionSeedSecretReady, reason, messageFormat, messageA...)
+	accountConditionSet.Manage(s).MarkFalse(KeyPairableConditionSeedSecretReady, reason, messageFormat, messageA...)
 }
 
 func (s *AccountStatus) MarkSeedSecretUnknown(reason, messageFormat string, messageA ...interface{}) {
 	s.KeyPair = nil
 
-	accountConditionSet.Manage(s).MarkUnknown(AccountConditionSeedSecretReady, reason, messageFormat, messageA...)
+	accountConditionSet.Manage(s).MarkUnknown(KeyPairableConditionSeedSecretReady, reason, messageFormat, messageA...)
 }
 
 func (s *AccountStatus) MarkJWTPushed() {

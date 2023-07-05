@@ -32,10 +32,10 @@ import (
 
 // UserSpec defines the desired state of User
 type UserSpec struct {
-	// SigningKey is the reference to the SigningKey that will be used to sign JWTs for this User. The controller
-	// will check the owner of the SigningKey is an Account, and that this User can be managed by that Account
+    // Issuer is the reference to the Issuer that will be used to sign JWTs for this User. The controller
+    // will check the owner of the Issuer is an Account, and that this User can be managed by that Account
 	// following its namespace and label selector restrictions.
-	SigningKey SigningKeyReference `json:"signingKey"`
+	Issuer IssuerReference `json:"issuer"`
 
 	// JWTSecretName is the name of the Secret that will be created to store the JWT for this User.
 	JWTSecretName string `json:"jwtSecretName"`
@@ -47,40 +47,44 @@ type UserSpec struct {
 	CredentialsSecretName string `json:"credentialsSecretName"`
 
 	// Permissions is a JWT claim for the User.
-	Permissions UserPermissions `json:"permissions"`
+    // +optional
+	Permissions *UserPermissions `json:"permissions,omitempty"`
 
 	// Limits is a JWT claim for the User.
-	Limits UserLimits `json:"limits"`
+    // +optional
+	Limits UserLimits `json:"limits,omitempty"`
 
 	// BearerToken is a JWT claim for the User.
-	BearerToken bool `json:"bearerToken"`
+    // +optional
+	BearerToken *bool `json:"bearerToken,omitempty"`
 }
 
 type UserPermissions struct {
-	Pub  Permission      `json:"pub"`
-	Sub  Permission      `json:"sub"`
+	Pub  Permission      `json:"pub,omitempty"`
+	Sub  Permission      `json:"sub,omitempty"`
 	Resp *RespPermission `json:"resp,omitempty"`
 }
 
 type Permission struct {
-	Allow []string `json:"allow"`
-	Deny  []string `json:"deny"`
+	Allow []string `json:"allow,omitempty"`
+	Deny  []string `json:"deny,omitempty"`
 }
 
 type RespPermission struct {
-	Max int `json:"max"`
-	TTL int `json:"ttl"`
+	MaxMsgs int             `json:"max"`
+	TTL     metav1.Duration `json:"ttl"`
 }
 
 type UserLimits struct {
-	Max     int64 `json:"max"`
-	Payload int64 `json:"payload"`
+	NatsLimits `json:",inline"`
 
 	// Src is a list of CIDR blocks
 	Src []string `json:"src,omitempty"`
 
 	// Times is a list of start/end times in the format "15:04:05".
 	Times []StartEndTime `json:"times,omitempty"`
+
+	Locale string `json:"locale,omitempty"`
 }
 
 type StartEndTime struct {
@@ -90,9 +94,10 @@ type StartEndTime struct {
 
 // UserStatus defines the observed state of User
 type UserStatus struct {
-	KeyPair    *KeyPair                 `json:"keyPair,omitempty"`
+    Status `json:",inline"`
+
+    KeyPair    *KeyPair                 `json:"keyPair,omitempty"`
 	AccountRef *InferredObjectReference `json:"accountRef,omitempty"`
-	Conditions apis.Conditions          `json:"conditions,omitempty"`
 }
 
 func (s *UserStatus) GetConditions() apis.Conditions {

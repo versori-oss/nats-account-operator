@@ -67,6 +67,8 @@ type OperatorSpec struct {
 
 // OperatorStatus defines the observed state of Operator
 type OperatorStatus struct {
+	Status `json:",inline"`
+
 	// KeyPair is the public/private key pair for the Operator. This is created by the controller when an Operator is
 	// created.
 	KeyPair *KeyPair `json:"keyPair,omitempty"`
@@ -78,12 +80,6 @@ type OperatorStatus struct {
 	// ResolvedSystemAccount is the Account that this Operator will use as it's system account. This is the same as the
 	// resource defined in OperatorSpec.SystemAccountRef, but validated that the resource exists.
 	ResolvedSystemAccount *InferredObjectReference `json:"resolvedSystemAccount,omitempty"`
-
-	// Conditions the latest available observations of a resource's current state.
-	// +optional
-	// +patchMergeKey=type
-	// +patchStrategy=merge
-	Conditions apis.Conditions `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 func (os *OperatorStatus) GetConditions() apis.Conditions {
@@ -108,6 +104,12 @@ type Operator struct {
 
 	Spec   OperatorSpec   `json:"spec,omitempty"`
 	Status OperatorStatus `json:"status,omitempty"`
+}
+
+var _ KeyPairable = (*Operator)(nil)
+
+func (o *Operator) GetStatus() *Status {
+	return &o.Status.Status
 }
 
 func (o *Operator) GetKeyPair() *KeyPair {

@@ -292,6 +292,8 @@ spec:
                 items:
                   properties:
                     keyPair:
+                      description: KeyPair is the reference to the KeyPair that will
+                        be used to sign JWTs for Accounts and Users.
                       properties:
                         publicKey:
                           type: string

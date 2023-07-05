@@ -26,7 +26,6 @@ SOFTWARE.
 package v1alpha1
 
 import (
-	"github.com/versori-oss/nats-account-operator/pkg/apis"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -55,22 +54,13 @@ type SigningKeySpec struct {
 
 // SigningKeyStatus defines the observed state of SigningKey
 type SigningKeyStatus struct {
+	Status `json:",inline"`
+
 	// KeyPair contains the public and private key information for this signing key.
 	KeyPair *KeyPair `json:"keyPair,omitempty"`
 
 	// OwnerRef references the owning object for this signing key. This should be one of Operator or Account.
 	OwnerRef *TypedObjectReference `json:"ownerRef,omitempty"`
-
-	// Conditions contains the current status of the signing key.
-	Conditions apis.Conditions `json:"conditions,omitempty"`
-}
-
-func (s *SigningKeyStatus) GetConditions() apis.Conditions {
-	return s.Conditions
-}
-
-func (s *SigningKeyStatus) SetConditions(conditions apis.Conditions) {
-	s.Conditions = conditions
 }
 
 //+genclient
@@ -90,8 +80,14 @@ type SigningKey struct {
 	Status SigningKeyStatus `json:"status,omitempty"`
 }
 
+var _ KeyPairable = (*SigningKey)(nil)
+
 func (s *SigningKey) GetKeyPair() *KeyPair {
 	return s.Status.KeyPair
+}
+
+func (s *SigningKey) GetStatus() *Status {
+	return &s.Status.Status
 }
 
 //+kubebuilder:object:root=true

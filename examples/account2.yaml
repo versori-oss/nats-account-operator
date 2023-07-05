@@ -1,0 +1,32 @@
+apiVersion: accounts.nats.io/v1alpha1
+kind: Account
+metadata:
+  name: test-2
+  namespace: default
+spec:
+  seedSecretName: test-2-account-seed
+  jwtSecretName: test-2-account-jwt
+  limits:
+    jetStream:
+      memoryStorage: -1 # Unlimited
+      diskStorage: 10737418240 # 10Gi
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: Operator
+      name: operator
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: User
+metadata:
+  name: test-2-user
+  namespace: default
+spec:
+  jwtSecretName: test-2-user-jwt
+  seedSecretName: test-2-user-seed
+  credentialsSecretName: test-2-user-nats-creds
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: Account
+      name: test-2

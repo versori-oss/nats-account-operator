@@ -1,0 +1,42 @@
+apiVersion: accounts.nats.io/v1alpha1
+kind: Operator
+metadata:
+  name: operator
+  namespace: default
+spec:
+  accountServerURL: nats://localhost:4222
+  jwtSecretName: operator-jwt
+  seedSecretName: operator-seed
+  operatorServiceURLs:
+    - nats://localhost:4222
+  systemAccountRef:
+    name: system
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: Account
+metadata:
+  name: system
+  namespace: default
+spec:
+  seedSecretName: system-seed
+  jwtSecretName: system-jwt
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: Operator
+      name: operator
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: User
+metadata:
+  name: system-user
+  namespace: default
+spec:
+  jwtSecretName: system-user-jwt
+  seedSecretName: system-user-seed
+  credentialsSecretName: system-user-nats-creds
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: Account
+      name: system

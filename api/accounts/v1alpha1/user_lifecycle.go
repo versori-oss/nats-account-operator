@@ -5,25 +5,22 @@ import "github.com/versori-oss/nats-account-operator/pkg/apis"
 const (
 	UserConditionReady                  = apis.ConditionReady
 	UserConditionAccountResolved        = "AccountResolved"
+	UserConditionIssuerResolved         = "IssuerResolved"
 	UserConditionJWTSecretReady         = "JWTSecretReady"
-	UserConditionSeedSecretReady        = "SeedSecretReady"
 	UserConditionCredentialsSecretReady = "CredentialsSecretReady"
 )
 
 var userConditionSet = apis.NewLivingConditionSet(
 	UserConditionReady,
+    KeyPairableConditionSeedSecretReady,
 	UserConditionAccountResolved,
+	UserConditionIssuerResolved,
 	UserConditionJWTSecretReady,
-	UserConditionSeedSecretReady,
 	UserConditionCredentialsSecretReady,
 )
 
 func (*User) GetConditionSet() apis.ConditionSet {
 	return userConditionSet
-}
-
-func (u *User) GetConditionManager() apis.ConditionManager {
-	return userConditionSet.Manage(&u.Status)
 }
 
 // GetCondition returns the condition currently associated with the given type, or nil.
@@ -59,6 +56,18 @@ func (s *UserStatus) MarkAccountResolveUnknown(reason, messageFormat string, mes
 	userConditionSet.Manage(s).MarkUnknown(UserConditionAccountResolved, reason, messageFormat, messageA...)
 }
 
+func (s *UserStatus) MarkIssuerResolved() {
+    accountConditionSet.Manage(s).MarkTrue(UserConditionIssuerResolved)
+}
+
+func (s *UserStatus) MarkIssuerResolveFailed(reason, messageFormat string, messageA ...interface{}) {
+    accountConditionSet.Manage(s).MarkFalse(UserConditionIssuerResolved, reason, messageFormat, messageA...)
+}
+
+func (s *UserStatus) MarkIssuerResolveUnknown(reason, messageFormat string, messageA ...interface{}) {
+    accountConditionSet.Manage(s).MarkUnknown(UserConditionIssuerResolved, reason, messageFormat, messageA...)
+}
+
 func (s *UserStatus) MarkJWTSecretReady() {
 	userConditionSet.Manage(s).MarkTrue(UserConditionJWTSecretReady)
 }
@@ -77,19 +86,19 @@ func (s *UserStatus) MarkSeedSecretReady(publicKey, seedSecretName string) {
 		SeedSecretName: seedSecretName,
 	}
 
-	userConditionSet.Manage(s).MarkTrue(UserConditionSeedSecretReady)
+	userConditionSet.Manage(s).MarkTrue(KeyPairableConditionSeedSecretReady)
 }
 
 func (s *UserStatus) MarkSeedSecretFailed(reason, messageFormat string, messageA ...interface{}) {
 	s.KeyPair = nil
 
-	userConditionSet.Manage(s).MarkFalse(UserConditionSeedSecretReady, reason, messageFormat, messageA...)
+	userConditionSet.Manage(s).MarkFalse(KeyPairableConditionSeedSecretReady, reason, messageFormat, messageA...)
 }
 
 func (s *UserStatus) MarkSeedSecretUnknown(reason, messageFormat string, messageA ...interface{}) {
 	s.KeyPair = nil
 
-	userConditionSet.Manage(s).MarkUnknown(UserConditionSeedSecretReady, reason, messageFormat, messageA...)
+	userConditionSet.Manage(s).MarkUnknown(KeyPairableConditionSeedSecretReady, reason, messageFormat, messageA...)
 }
 
 func (s *UserStatus) MarkCredentialsSecretReady() {

@@ -18,10 +18,6 @@ func (*SigningKey) GetConditionSet() apis.ConditionSet {
 	return signingKeyConditionSet
 }
 
-func (s *SigningKey) GetConditionManager() apis.ConditionManager {
-	return signingKeyConditionSet.Manage(&s.Status)
-}
-
 // GetCondition returns the condition currently associated with the given type, or nil.
 func (s *SigningKeyStatus) GetCondition(t apis.ConditionType) *apis.Condition {
 	return signingKeyConditionSet.Manage(s).GetCondition(t)

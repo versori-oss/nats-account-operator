@@ -13,6 +13,7 @@ const (
 
 var operatorConditionSet = apis.NewLivingConditionSet(
 	OperatorConditionReady,
+    KeyPairableConditionSeedSecretReady,
 	OperatorConditionSystemAccountResolved,
 	OperatorConditionSystemAccountReady,
 	OperatorConditionSigningKeysUpdated,
@@ -22,10 +23,6 @@ var operatorConditionSet = apis.NewLivingConditionSet(
 
 func (*Operator) GetConditionSet() apis.ConditionSet {
 	return operatorConditionSet
-}
-
-func (o *Operator) GetConditionManager() apis.ConditionManager {
-	return operatorConditionSet.Manage(&o.Status)
 }
 
 // GetCondition returns the condition currently associated with the given type, or nil.

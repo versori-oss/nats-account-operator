@@ -14,10 +14,10 @@ const (
 )
 
 const (
-	NatsSecretJWTKey       = "jwt"
+	NatsSecretJWTKey       = "nats.jwt"
 	NatsSecretCredsKey     = "nats.creds"
-	NatsSecretSeedKey      = "seed"
-	NatsSecretPublicKeyKey = "publicKey"
+	NatsSecretSeedKey      = "seed.nk"
+	NatsSecretPublicKeyKey = "public.nk"
 )
 
 // InferredObjectReference is an object reference without the APIVersion and Kind fields. The APIVersion and Kind
@@ -49,8 +49,8 @@ type SigningKeyEmbeddedStatus struct {
 	KeyPair KeyPair `json:"keyPair,omitempty"`
 }
 
-// SigningKeyReference provides the means to look up a signing key for generating an Account or User.
-type SigningKeyReference struct {
+// IssuerReference provides the means to look up a signing key for generating an Account or User.
+type IssuerReference struct {
 	Ref TypedObjectReference `json:"ref"`
 }
 

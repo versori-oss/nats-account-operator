@@ -52,97 +52,11 @@ spec:
                 description: CredentialsSecretName is the name of the Secret that
                   will be created to store the credentials for this User.
                 type: string
-              jwtSecretName:
-                description: JWTSecretName is the name of the Secret that will be
-                  created to store the JWT for this User.
-                type: string
-              limits:
-                description: Limits is a JWT claim for the User.
-                properties:
-                  max:
-                    format: int64
-                    type: integer
-                  payload:
-                    format: int64
-                    type: integer
-                  src:
-                    description: Src is a list of CIDR blocks
-                    items:
-                      type: string
-                    type: array
-                  times:
-                    description: Times is a list of start/end times in the format
-                      "15:04:05".
-                    items:
-                      properties:
-                        end:
-                          type: string
-                        start:
-                          type: string
-                      required:
-                      - end
-                      - start
-                      type: object
-                    type: array
-                required:
-                - max
-                - payload
-                type: object
-              permissions:
-                description: Permissions is a JWT claim for the User.
-                properties:
-                  pub:
-                    properties:
-                      allow:
-                        items:
-                          type: string
-                        type: array
-                      deny:
-                        items:
-                          type: string
-                        type: array
-                    required:
-                    - allow
-                    - deny
-                    type: object
-                  resp:
-                    properties:
-                      max:
-                        type: integer
-                      ttl:
-                        type: integer
-                    required:
-                    - max
-                    - ttl
-                    type: object
-                  sub:
-                    properties:
-                      allow:
-                        items:
-                          type: string
-                        type: array
-                      deny:
-                        items:
-                          type: string
-                        type: array
-                    required:
-                    - allow
-                    - deny
-                    type: object
-                required:
-                - pub
-                - sub
-                type: object
-              seedSecretName:
-                description: SeedSecretName is the name of the Secret that will be
-                  created to store the seed for this User.
-                type: string
-              signingKey:
-                description: SigningKey is the reference to the SigningKey that will
-                  be used to sign JWTs for this User. The controller will check the
-                  owner of the SigningKey is an Account, and that this User can be
-                  managed by that Account following its namespace and label selector
-                  restrictions.
+              issuer:
+                description: Issuer is the reference to the Issuer that will be used
+                  to sign JWTs for this User. The controller will check the owner
+                  of the Issuer is an Account, and that this User can be managed by
+                  that Account following its namespace and label selector restrictions.
                 properties:
                   ref:
                     properties:
@@ -168,14 +82,89 @@ spec:
                 required:
                 - ref
                 type: object
+              jwtSecretName:
+                description: JWTSecretName is the name of the Secret that will be
+                  created to store the JWT for this User.
+                type: string
+              limits:
+                description: Limits is a JWT claim for the User.
+                properties:
+                  data:
+                    format: int64
+                    type: integer
+                  locale:
+                    type: string
+                  payload:
+                    format: int64
+                    type: integer
+                  src:
+                    description: Src is a list of CIDR blocks
+                    items:
+                      type: string
+                    type: array
+                  subs:
+                    format: int64
+                    type: integer
+                  times:
+                    description: Times is a list of start/end times in the format
+                      "15:04:05".
+                    items:
+                      properties:
+                        end:
+                          type: string
+                        start:
+                          type: string
+                      required:
+                      - end
+                      - start
+                      type: object
+                    type: array
+                type: object
+              permissions:
+                description: Permissions is a JWT claim for the User.
+                properties:
+                  pub:
+                    properties:
+                      allow:
+                        items:
+                          type: string
+                        type: array
+                      deny:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  resp:
+                    properties:
+                      max:
+                        type: integer
+                      ttl:
+                        type: string
+                    required:
+                    - max
+                    - ttl
+                    type: object
+                  sub:
+                    properties:
+                      allow:
+                        items:
+                          type: string
+                        type: array
+                      deny:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                type: object
+              seedSecretName:
+                description: SeedSecretName is the name of the Secret that will be
+                  created to store the seed for this User.
+                type: string
             required:
-            - bearerToken
             - credentialsSecretName
+            - issuer
             - jwtSecretName
-            - limits
-            - permissions
             - seedSecretName
-            - signingKey
             type: object
           status:
             description: UserStatus defines the observed state of User
@@ -193,8 +182,8 @@ spec:
                 - name
                 type: object
               conditions:
-                description: Conditions is the schema for the conditions portion of
-                  the payload
+                description: Conditions the latest available observations of a resource's
+                  current state.
                 items:
                   description: 'Condition defines a readiness condition for a Knative
                     resource. See: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties'
@@ -228,6 +217,8 @@ spec:
                   type: object
                 type: array
               keyPair:
+                description: KeyPair is the reference to the KeyPair that will be
+                  used to sign JWTs for Accounts and Users.
                 properties:
                   publicKey:
                     type: string

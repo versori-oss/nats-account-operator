@@ -89,6 +89,8 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 
 	originalStatus := operator.Status.DeepCopy()
 
+    operator.Status.InitializeConditions()
+
 	defer func() {
 		if !equality.Semantic.DeepEqual(originalStatus, operator.Status) {
 			if err2 := r.Status().Update(ctx, operator); err2 != nil {
@@ -327,20 +329,9 @@ func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, op
 			Group:    v1alpha1.GroupVersion.Group,
 			Resource: v1alpha1.Account{}.ResourceVersion,
 		}, operator.Spec.SystemAccountRef.Name)
-	} else {
-		// The system account is ready, but does it have a system user to log in with?
-		if err := r.ensureSystemAccountHasUser(ctx, &sysAcc); errors.IsNotFound(err) {
-			logger.V(1).Info("system account has no system user")
-			operator.Status.MarkSystemAccountNotReady("system account has no system user", "")
-			return "", err
-		} else if err != nil {
-			logger.Error(err, "failed to ensure system account has system user")
-			operator.Status.MarkSystemAccountNotReady("failed to ensure system account has system user", "")
-			return "", err
-		}
-		// end clean-up
-		operator.Status.MarkSystemAccountReady()
 	}
+
+    operator.Status.MarkSystemAccountReady()
 
 	return sysAcc.Status.KeyPair.PublicKey, nil
 }
@@ -381,26 +372,6 @@ func (r *OperatorReconciler) updateOperatorJWTSigningKeys(ctx context.Context, o
 	}
 
 	return nil
-}
-
-func (r *OperatorReconciler) ensureSystemAccountHasUser(ctx context.Context, sysAcc *v1alpha1.Account) error {
-	logger := log.FromContext(ctx)
-
-	// All users of the system account should be within its namespace
-	usrList, err := r.AccountsClientSet.Users(sysAcc.GetNamespace()).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		logger.V(1).Info("failed to list users for system account", "error", err)
-		return err
-	}
-
-	for _, usr := range usrList.Items {
-		if usr.Status.IsReady() && usr.Status.AccountRef.Name == sysAcc.GetName() {
-			// System account has a user so return nil
-			return nil
-		}
-	}
-
-	return errors.NewNotFound(v1alpha1.Resource(v1alpha1.User{}.ResourceVersion), "User")
 }
 
 // SetupWithManager sets up the controller with the Manager.
