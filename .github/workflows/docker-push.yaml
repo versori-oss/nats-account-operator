@@ -1,0 +1,51 @@
+name: Docker Push
+on:
+  release:
+    types:
+      - created
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  id-token: write
+env:
+  KO_DOCKER_REPO: europe-docker.pkg.dev/versori/oss-contrib
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Setup Golang
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.18
+      - name: Setup Google Cloud Authentication
+        uses: google-github-actions/auth@v0
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
+      - name: Configure Docker to Artifact Registry
+        run: gcloud auth configure-docker europe-docker.pkg.dev
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          images: nats-account-operator
+          sep-tags: ","
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+      - uses: ko-build/setup-ko@v0.6
+      - name: Build and push
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          # metadata-action outputs the image name with the tags, so strip out the parts before ":" and join back
+          # to a csv
+          tags=$(echo -n '${{ steps.meta.outputs.json }}' | jq -r '[ .tags[] | split(":") | .[1] ] | join(",")')
+          ko publish -P -t "${tags}" --platform linux/amd64,linux/arm64 ./
