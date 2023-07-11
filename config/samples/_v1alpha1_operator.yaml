@@ -7,6 +7,38 @@ metadata:
     app.kubernetes.io/part-of: nats-accounts-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/created-by: nats-accounts-operator
-  name: operator-sample
+  name: operator-test
 spec:
-  # TODO(user): Add fields here
+  accountServerURL: some_string
+  accountsNamespaceSelector:
+    matchExpressions:
+      - key: some_key
+        operator: Exists
+        values: []
+    matchLabels:
+      some_string: some_string
+  accountsSelector:
+    matchExpressions:
+      - key: some_string
+        operator: some_string
+        values:
+          - some_string
+    matchLabels:
+      some_string: hahahaha
+  identities:
+    - id: some_string
+      proof: some_string
+  jwtSecretName: operator-jwt-secret # This is the name of the secret that will be created by the operator
+  operatorServiceURLs:
+    - nats://localhost:4222
+  seedSecretName: operator-seed-secret
+  signingKeysSelector:
+    matchExpressions:
+      - key: some_string
+        operator: some_string
+        values:
+          - some_string
+    matchLabels:
+      some_string: some_string
+  systemAccountRef:
+    name: account-sample

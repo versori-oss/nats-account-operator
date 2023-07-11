@@ -9,4 +9,35 @@ metadata:
     app.kubernetes.io/created-by: nats-accounts-operator
   name: user-sample
 spec:
-  # TODO(user): Add fields here
+  bearerToken: true
+  credentialsSecretName: some_name
+  jwtSecretName: some_name
+  limits:
+    max: 0
+    payload: 0
+    src: some_string
+    times:
+      - end: some_string
+        start: some_string
+  permissions:
+    pub:
+      allow:
+        - some_string
+      deny:
+        - some_string
+    resp:
+      max: 0
+      ttl: 0
+    sub:
+      allow:
+        - some_string
+      deny:
+        - some_string
+  seedSecretName: some_name
+  signingKey:
+    ref:
+      apiVersion: v1
+      kind: Secret
+      name: some_name
+      namespace: default
+      uid: some_string

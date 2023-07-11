@@ -1,0 +1,68 @@
+name: Pull Request
+on:
+  pull_request:
+    branches:
+      - main
+permissions:
+  contents: read
+  id-token: write
+env:
+  KO_DOCKER_REPO: europe-docker.pkg.dev/versori/oss-contrib
+jobs:
+  test:
+    strategy:
+      matrix:
+        go-version: [ 1.18.x ]
+        os: [ ubuntu-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Install Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: Test
+        run: make test
+  publish:
+    needs:
+      - test
+    runs-on: ubuntu-latest
+    env:
+      KO_DOCKER_REPO: europe-docker.pkg.dev/versori/oss-contrib
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Setup Golang
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.18
+      - name: Setup Google Cloud Authentication
+        uses: google-github-actions/auth@v0
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
+      - name: Configure Docker to Artifact Registry
+        run: gcloud auth configure-docker europe-docker.pkg.dev
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          images: nats-account-operator
+          sep-tags: ","
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+      - uses: ko-build/setup-ko@v0.6
+      - name: Build and push
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          STEPS_META_OUTPUTS_JSON: ${{ steps.meta.outputs.json }}
+        run: |
+          # metadata-action outputs the image name with the tags, so strip out the parts before ":" and join back
+          # to a csv
+          tags=$(echo -n $STEPS_META_OUTPUTS_JSON | jq -r '[ .tags[] | split(":") | .[1] ] | join(",")')
+          ko publish -P -t "${tags}" --platform linux/amd64,linux/arm64 ./
+

@@ -27,10 +27,14 @@ package main
 
 import (
 	"flag"
+    "github.com/versori-oss/nats-account-operator/pkg/nsc"
+    "go.uber.org/zap/zapcore"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+
+	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -40,8 +44,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/v1alpha1"
+	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/controllers"
+	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -67,14 +72,17 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	opts := zap.Options{
-		Development: true,
+		Development:     true,
+		StacktraceLevel: zapcore.FatalLevel,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	cfg := ctrl.GetConfigOrDie()
+
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
 		Port:                   9443,
@@ -97,26 +105,49 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
+	clientSet := kubernetes.NewForConfigOrDie(cfg)
+	accountsClientSet := accountsclientsets.NewForConfigOrDie(cfg)
 
+	clientSet.AuthorizationV1()
 	if err = (&controllers.OperatorReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		CV1Interface:      clientSet.CoreV1(),
+		AccountsClientSet: accountsClientSet.AccountsV1alpha1(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Operator")
 		os.Exit(1)
 	}
 	if err = (&controllers.AccountReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+        BaseReconciler: &controllers.BaseReconciler{
+            Client: mgr.GetClient(),
+            Scheme: mgr.GetScheme(),
+            CoreV1: clientSet.CoreV1(),
+        },
+		AccountsV1Alpha1: accountsClientSet.AccountsV1alpha1(),
+        SysAccountLoader: nsc.NewSystemAccountLoader(accountsClientSet.AccountsV1alpha1(), clientSet.CoreV1()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Account")
 		os.Exit(1)
 	}
 	if err = (&controllers.UserReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+        BaseReconciler: &controllers.BaseReconciler{
+            Client: mgr.GetClient(),
+            Scheme: mgr.GetScheme(),
+            CoreV1: clientSet.CoreV1(),
+        },
+		AccountsClientSet: accountsClientSet.AccountsV1alpha1(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "User")
+		os.Exit(1)
+	}
+	if err = (&controllers.SigningKeyReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		CV1Interface:      clientSet.CoreV1(),
+		AccountsClientSet: accountsClientSet.AccountsV1alpha1(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "SigningKey")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder
