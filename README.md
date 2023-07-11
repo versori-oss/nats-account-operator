@@ -92,9 +92,31 @@ make manifests
 
 More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
+## Creating a release
+
+We're currently using [release-please][release-please] to manage our releases. Once we have a 1.0.0 release this may 
+switch to [semantic-release][semantic-release]. 
+
+1. Create a release PR:
+
+    ```sh
+    GITHUB_TOKEN=<your-github-token>
+    # use the --release-as flag if you want to control what the next release version will be
+    npx release-please release-pr --release-type go --repo-url versori-oss/nats-account-operator --token=$GITHUB_TOKEN
+    ```
+2. Merge the release PR via GitHub
+3. Create a release:
+
+    ```sh
+    # use the --prerelease flag if this is a pre-release
+    npx release-please github-release --release-type go --repo-url versori-oss/nats-account-operator --token=$GITHUB_TOKEN
+    ```
+
 ## License
 
 See [LICENSE][license]
 
 [nats-authnz]: https://docs.nats.io/running-a-nats-service/configuration/securing_nats/auth_intro/jwt
 [license]: ./LICENSE
+[release-please]: https://github.com/googleapis/release-please
+[semantic-release]: https://github.com/semantic-release/semantic-release
