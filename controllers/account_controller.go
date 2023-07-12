@@ -795,16 +795,16 @@ func (r *AccountReconciler) getNATSOptions(ctx context.Context, operator *v1alph
 			return nil, fmt.Errorf("failed to load CA file: %w", err)
 		}
 
-		return []nats.Option{nats.RootCAs(caFile)}, nil
+		return []nats.Option{nsc.CABundle(caFile)}, nil
 	default:
 		return nil, fmt.Errorf("invalid TLS config: missing CA file")
 	}
 }
 
-func (r *AccountReconciler) loadCAFile(ctx context.Context, ns string, selector v1.SecretKeySelector) (string, error) {
+func (r *AccountReconciler) loadCAFile(ctx context.Context, ns string, selector v1.SecretKeySelector) ([]byte, error) {
 	secret, err := r.CoreV1.Secrets(ns).Get(ctx, selector.Name, metav1.GetOptions{})
 	if err != nil {
-		return "", fmt.Errorf("failed to get caFile secret: %w", err)
+		return nil, fmt.Errorf("failed to get caFile secret: %w", err)
 	}
 
 	key := "ca.crt"
@@ -814,10 +814,10 @@ func (r *AccountReconciler) loadCAFile(ctx context.Context, ns string, selector 
 
 	caFile, ok := secret.Data[key]
 	if !ok {
-		return "", fmt.Errorf("caFile secret missing key %q", key)
+		return nil, fmt.Errorf("caFile secret missing key %q", key)
 	}
 
-	return string(caFile), nil
+	return caFile, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
