@@ -28,6 +28,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"github.com/nats-io/nats.go"
 	"github.com/versori-oss/nats-account-operator/controllers/resources"
 	"github.com/versori-oss/nats-account-operator/pkg/helpers"
 	"go.uber.org/multierr"
@@ -88,7 +89,7 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 
 	originalStatus := acc.Status.DeepCopy()
 
-    acc.Status.InitializeConditions()
+	acc.Status.InitializeConditions()
 
 	defer func() {
 		if !equality.Semantic.DeepEqual(originalStatus, acc.Status) {
@@ -158,20 +159,19 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 		return ctrl.Result{}, err
 	}
 
+	issuerKP, ok, err := r.loadIssuerSeed(ctx, acc, keyPairable)
+	if err != nil || !ok {
+		if ok {
+			logger.Info("cluster not prepared for loading the issuer seed, will try later", "error", err.Error())
 
-    issuerKP, ok, err := r.loadIssuerSeed(ctx, acc, keyPairable)
-    if err != nil || !ok {
-        if ok {
-            logger.Info("cluster not prepared for loading the issuer seed, will try later", "error", err.Error())
+			// something else needs to change which will trigger another reconcile
+			return ctrl.Result{}, nil
+		}
 
-            // something else needs to change which will trigger another reconcile
-            return ctrl.Result{}, nil
-        }
+		logger.Error(err, "failed to load issuer seed")
 
-        logger.Error(err, "failed to load issuer seed")
-
-        return ctrl.Result{}, err
-    }
+		return ctrl.Result{}, err
+	}
 
 	accountJWT, ok, err := r.reconcileJWTSecret(ctx, acc, issuerKP)
 	if err != nil || !ok {
@@ -183,9 +183,9 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 			return ctrl.Result{}, err
 		}
 	} else {
-        // system accounts need the condition to be set to true to enable them to be considered "ready"
-        acc.Status.MarkJWTPushed()
-    }
+		// system accounts need the condition to be set to true to enable them to be considered "ready"
+		acc.Status.MarkJWTPushed()
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -635,7 +635,16 @@ func (r *AccountReconciler) ensureJWTPushed(ctx context.Context, acc *v1alpha1.A
 		return err
 	}
 
-	nscClient, err := nsc.Connect(operator.Spec.AccountServerURL, issuer, sysSeed)
+	opts, err := r.getNATSOptions(ctx, operator)
+	if err != nil {
+		logger.Error(err, "failed to get NATS options")
+
+		acc.Status.MarkJWTPushFailed(v1alpha1.ReasonUnknownError, err.Error())
+
+		return err
+	}
+
+	nscClient, err := nsc.Connect(operator.Spec.AccountServerURL, issuer, sysSeed, opts...)
 	if err != nil {
 		logger.Error(err, "failed to connect to account server")
 
@@ -674,12 +683,12 @@ func (r *AccountReconciler) finalizeAccount(ctx context.Context, acc *v1alpha1.A
 		return nil
 	}
 
-    // TODO: anything from here on out should follow the happy path. If not, then someone is deleting things en-masse
-    //  and isn't letting our dear old operator clean up after itself.
-    //  Can we remove the deletion timestamp and add an Event to the resource to indicate that it was attempted to be
-    //  deleted, but failed? This could let the user wait for everything to reconcile again, then a deletion would work.
-    //  If the user really wanted to circumvent this, they could force delete and remove the finalizer - at which point
-    //  "if the user wants to do that, then it's their *** fault".
+	// TODO: anything from here on out should follow the happy path. If not, then someone is deleting things en-masse
+	//  and isn't letting our dear old operator clean up after itself.
+	//  Can we remove the deletion timestamp and add an Event to the resource to indicate that it was attempted to be
+	//  deleted, but failed? This could let the user wait for everything to reconcile again, then a deletion would work.
+	//  If the user really wanted to circumvent this, they could force delete and remove the finalizer - at which point
+	//  "if the user wants to do that, then it's their *** fault".
 
 	operatorRef := acc.Status.OperatorRef
 	operator, err := r.AccountsV1Alpha1.Operators(operatorRef.Namespace).Get(ctx, operatorRef.Name, metav1.GetOptions{})
@@ -695,24 +704,24 @@ func (r *AccountReconciler) finalizeAccount(ctx context.Context, acc *v1alpha1.A
 		return fmt.Errorf("operator could not be loaded: %w", err)
 	}
 
-    if operator.Status.KeyPair == nil {
-        return fmt.Errorf("operator not ready")
-    }
+	if operator.Status.KeyPair == nil {
+		return fmt.Errorf("operator not ready")
+	}
 
-    operatorSeed, err := r.CoreV1.Secrets(operator.Namespace).Get(ctx, operator.Status.KeyPair.SeedSecretName, metav1.GetOptions{})
-    if err != nil {
-        return fmt.Errorf("unable to load operator seed: %w", err)
-    }
+	operatorSeed, err := r.CoreV1.Secrets(operator.Namespace).Get(ctx, operator.Status.KeyPair.SeedSecretName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("unable to load operator seed: %w", err)
+	}
 
-    operatorSeedData, ok := operatorSeed.Data[v1alpha1.NatsSecretSeedKey]
-    if !ok {
-        return fmt.Errorf("operator seed secret missing property, %q", v1alpha1.NatsSecretSeedKey)
-    }
+	operatorSeedData, ok := operatorSeed.Data[v1alpha1.NatsSecretSeedKey]
+	if !ok {
+		return fmt.Errorf("operator seed secret missing property, %q", v1alpha1.NatsSecretSeedKey)
+	}
 
-    operatorKP, err := nkeys.FromSeed(operatorSeedData)
-    if err != nil {
-        return fmt.Errorf("failed to parse operator seed data: %w", err)
-    }
+	operatorKP, err := nkeys.FromSeed(operatorSeedData)
+	if err != nil {
+		return fmt.Errorf("failed to parse operator seed data: %w", err)
+	}
 
 	sysSeed, err := r.SysAccountLoader.Load(ctx, operator)
 	if err != nil {
@@ -729,7 +738,16 @@ func (r *AccountReconciler) finalizeAccount(ctx context.Context, acc *v1alpha1.A
 		return err
 	}
 
-	nscClient, err := nsc.Connect(operator.Spec.AccountServerURL, operatorKP, sysSeed)
+	opts, err := r.getNATSOptions(ctx, operator)
+	if err != nil {
+		logger.Error(err, "failed to get NATS options")
+
+		acc.Status.MarkJWTPushFailed(v1alpha1.ReasonUnknownError, err.Error())
+
+		return err
+	}
+
+	nscClient, err := nsc.Connect(operator.Spec.AccountServerURL, operatorKP, sysSeed, opts...)
 	if err != nil {
 		logger.Error(err, "failed to connect to account server during finalization")
 
@@ -745,6 +763,45 @@ func (r *AccountReconciler) finalizeAccount(ctx context.Context, acc *v1alpha1.A
 	}
 
 	return nil
+}
+
+func (r *AccountReconciler) getNATSOptions(ctx context.Context, operator *v1alpha1.Operator) ([]nats.Option, error) {
+	if operator.Spec.TLSConfig == nil {
+		return nil, nil
+	}
+
+	tlsConfig := operator.Spec.TLSConfig
+
+	switch {
+	case tlsConfig.CAFile != nil:
+		caFile, err := r.loadCAFile(ctx, operator.Namespace, *tlsConfig.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load CA file: %w", err)
+		}
+
+		return []nats.Option{nats.RootCAs(caFile)}, nil
+	default:
+		return nil, fmt.Errorf("invalid TLS config: missing CA file")
+	}
+}
+
+func (r *AccountReconciler) loadCAFile(ctx context.Context, ns string, selector v1.SecretKeySelector) (string, error) {
+	secret, err := r.CoreV1.Secrets(ns).Get(ctx, selector.Name, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get caFile secret: %w", err)
+	}
+
+	key := "ca.crt"
+	if selector.Key != "" {
+		key = selector.Key
+	}
+
+	caFile, ok := secret.Data[key]
+	if !ok {
+		return "", fmt.Errorf("caFile secret missing key %q", key)
+	}
+
+	return string(caFile), nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
