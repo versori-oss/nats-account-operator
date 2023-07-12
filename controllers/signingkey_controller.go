@@ -85,7 +85,7 @@ func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	originalStatus := signingKey.Status.DeepCopy()
 
-    signingKey.Status.InitializeConditions()
+	signingKey.Status.InitializeConditions()
 
 	defer func() {
 		if !equality.Semantic.DeepEqual(originalStatus, signingKey.Status) {

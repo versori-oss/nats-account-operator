@@ -32,8 +32,8 @@ import (
 
 // UserSpec defines the desired state of User
 type UserSpec struct {
-    // Issuer is the reference to the Issuer that will be used to sign JWTs for this User. The controller
-    // will check the owner of the Issuer is an Account, and that this User can be managed by that Account
+	// Issuer is the reference to the Issuer that will be used to sign JWTs for this User. The controller
+	// will check the owner of the Issuer is an Account, and that this User can be managed by that Account
 	// following its namespace and label selector restrictions.
 	Issuer IssuerReference `json:"issuer"`
 
@@ -47,15 +47,15 @@ type UserSpec struct {
 	CredentialsSecretName string `json:"credentialsSecretName"`
 
 	// Permissions is a JWT claim for the User.
-    // +optional
+	// +optional
 	Permissions *UserPermissions `json:"permissions,omitempty"`
 
 	// Limits is a JWT claim for the User.
-    // +optional
+	// +optional
 	Limits UserLimits `json:"limits,omitempty"`
 
 	// BearerToken is a JWT claim for the User.
-    // +optional
+	// +optional
 	BearerToken *bool `json:"bearerToken,omitempty"`
 }
 
@@ -94,9 +94,9 @@ type StartEndTime struct {
 
 // UserStatus defines the observed state of User
 type UserStatus struct {
-    Status `json:",inline"`
+	Status `json:",inline"`
 
-    KeyPair    *KeyPair                 `json:"keyPair,omitempty"`
+	KeyPair    *KeyPair                 `json:"keyPair,omitempty"`
 	AccountRef *InferredObjectReference `json:"accountRef,omitempty"`
 }
 

@@ -27,8 +27,8 @@ package main
 
 import (
 	"flag"
-    "github.com/versori-oss/nats-account-operator/pkg/nsc"
-    "go.uber.org/zap/zapcore"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
+	"go.uber.org/zap/zapcore"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -119,23 +119,23 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controllers.AccountReconciler{
-        BaseReconciler: &controllers.BaseReconciler{
-            Client: mgr.GetClient(),
-            Scheme: mgr.GetScheme(),
-            CoreV1: clientSet.CoreV1(),
-        },
+		BaseReconciler: &controllers.BaseReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+			CoreV1: clientSet.CoreV1(),
+		},
 		AccountsV1Alpha1: accountsClientSet.AccountsV1alpha1(),
-        SysAccountLoader: nsc.NewSystemAccountLoader(accountsClientSet.AccountsV1alpha1(), clientSet.CoreV1()),
+		SysAccountLoader: nsc.NewSystemAccountLoader(accountsClientSet.AccountsV1alpha1(), clientSet.CoreV1()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Account")
 		os.Exit(1)
 	}
 	if err = (&controllers.UserReconciler{
-        BaseReconciler: &controllers.BaseReconciler{
-            Client: mgr.GetClient(),
-            Scheme: mgr.GetScheme(),
-            CoreV1: clientSet.CoreV1(),
-        },
+		BaseReconciler: &controllers.BaseReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+			CoreV1: clientSet.CoreV1(),
+		},
 		AccountsClientSet: accountsClientSet.AccountsV1alpha1(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "User")

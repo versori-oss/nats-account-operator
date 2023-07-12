@@ -31,6 +31,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// TLSConfig is the TLS configuration for communicating to the NATS server for pushing/deleting account JWTs.
+// Initially this only supports defining server-side TLS verification by defining a CA certificate within a secret, in
+// the future we will support mutual-TLS authentication by defining a client certificate and key within a secret.
+type TLSConfig struct {
+	// CAFile is a reference to a secret containing the CA certificate to use for TLS connections.
+	CAFile *v1.SecretKeySelector `json:"caFile,omitempty"`
+}
+
 // OperatorSpec defines the desired state of Operator
 type OperatorSpec struct {
 	// JWTSecretName is the name of the secret containing the self-signed Operator JWT.
@@ -57,6 +65,9 @@ type OperatorSpec struct {
 	// SystemAccountRef is a reference to the Account that this Operator will use as it's system account. It must exist
 	// in the same namespace as the Operator, the AccountsNamespaceSelector and AccountsSelector are ignored.
 	SystemAccountRef v1.LocalObjectReference `json:"systemAccountRef"`
+
+	// TLSConfig is the TLS configuration for communicating to the NATS server for pushing/deleting account JWTs.
+	TLSConfig *TLSConfig `json:"tlsConfig,omitempty"`
 
 	// AccountServerURL is a JWT claim for the Operator
 	AccountServerURL string `json:"accountServerURL,omitempty"`

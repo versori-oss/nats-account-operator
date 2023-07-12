@@ -82,36 +82,36 @@ func ConvertToNATSResponseType(responseType v1alpha1.ResponseType) jwt.ResponseT
 }
 
 func ConvertToNatsLimits(in v1alpha1.NatsLimits, defaults jwt.NatsLimits) jwt.NatsLimits {
-    return jwt.NatsLimits{
-        Subs:    getDefaultFromPtr(in.Subs, defaults.Subs),
-        Data:    getDefaultFromPtr(in.Data, defaults.Data),
-        Payload: getDefaultFromPtr(in.Payload, defaults.Payload),
-    }
+	return jwt.NatsLimits{
+		Subs:    getDefaultFromPtr(in.Subs, defaults.Subs),
+		Data:    getDefaultFromPtr(in.Data, defaults.Data),
+		Payload: getDefaultFromPtr(in.Payload, defaults.Payload),
+	}
 }
 
 func ConvertToAccountLimits(in v1alpha1.AccountLimits, defaults jwt.AccountLimits) jwt.AccountLimits {
-    return jwt.AccountLimits{
-        Imports:         getDefaultFromPtr(in.Imports, defaults.Imports),
-        Exports:         getDefaultFromPtr(in.Exports, defaults.Exports),
-        WildcardExports: getDefaultFromPtr(in.WildcardExports, defaults.WildcardExports),
-        DisallowBearer:  in.DisallowBearer,
-        Conn:            getDefaultFromPtr(in.Conn, defaults.Conn),
-        LeafNodeConn:    getDefaultFromPtr(in.LeafNodeConn, defaults.LeafNodeConn),
-    }
+	return jwt.AccountLimits{
+		Imports:         getDefaultFromPtr(in.Imports, defaults.Imports),
+		Exports:         getDefaultFromPtr(in.Exports, defaults.Exports),
+		WildcardExports: getDefaultFromPtr(in.WildcardExports, defaults.WildcardExports),
+		DisallowBearer:  in.DisallowBearer,
+		Conn:            getDefaultFromPtr(in.Conn, defaults.Conn),
+		LeafNodeConn:    getDefaultFromPtr(in.LeafNodeConn, defaults.LeafNodeConn),
+	}
 }
 
 func ConvertToNatsTimeRanges(in []v1alpha1.StartEndTime) []jwt.TimeRange {
-    if in == nil {
-        return nil
-    }
+	if in == nil {
+		return nil
+	}
 
-    out := make([]jwt.TimeRange, len(in))
-    for i, v := range in {
-        out[i] = jwt.TimeRange{
-            Start: v.Start,
-            End:   v.End,
-        }
-    }
+	out := make([]jwt.TimeRange, len(in))
+	for i, v := range in {
+		out[i] = jwt.TimeRange{
+			Start: v.Start,
+			End:   v.End,
+		}
+	}
 
-    return out
+	return out
 }
