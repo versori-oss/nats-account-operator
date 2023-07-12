@@ -26,31 +26,31 @@ SOFTWARE.
 package controllers
 
 import (
-    "context"
-    "fmt"
-    "github.com/versori-oss/nats-account-operator/controllers/resources"
-    "k8s.io/client-go/tools/record"
+	"context"
+	"fmt"
+	"github.com/versori-oss/nats-account-operator/controllers/resources"
+	"k8s.io/client-go/tools/record"
 
-    "go.uber.org/multierr"
-    v1 "k8s.io/api/core/v1"
-    "k8s.io/apimachinery/pkg/api/equality"
-    "k8s.io/apimachinery/pkg/api/errors"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-    ctrl "sigs.k8s.io/controller-runtime"
-    "sigs.k8s.io/controller-runtime/pkg/log"
+	"go.uber.org/multierr"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
-    "github.com/nats-io/jwt/v2"
-    "github.com/nats-io/nkeys"
-    "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-    accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
-    "github.com/versori-oss/nats-account-operator/pkg/nsc"
+	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nkeys"
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 // UserReconciler reconciles a User object
 type UserReconciler struct {
 	*BaseReconciler
 	AccountsClientSet accountsclientsets.AccountsV1alpha1Interface
-    EventRecorder     record.EventRecorder
+	EventRecorder     record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups=accounts.nats.io,resources=users,verbs=get;list;watch;create;update;patch;delete
@@ -77,7 +77,7 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 
 	originalStatus := usr.Status.DeepCopy()
 
-    usr.Status.InitializeConditions()
+	usr.Status.InitializeConditions()
 
 	defer func() {
 		if !equality.Semantic.DeepEqual(originalStatus, usr.Status) {
@@ -89,14 +89,14 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 		}
 	}()
 
-    seed, ok, err := r.reconcileSeedSecret(ctx, usr)
-    if err != nil || !ok {
-        return ctrl.Result{}, err
-    }
+	seed, ok, err := r.reconcileSeedSecret(ctx, usr)
+	if err != nil || !ok {
+		return ctrl.Result{}, err
+	}
 
 	// get the KeyPairable which will be used to sign the JWT, resolveIssuer is part of BaseReconciler which doesn't
-    // mark conditions (since it doesn't know what resource type it's reconciling), so we need to check for condition
-    // errors and mark the conditions accordingly
+	// mark conditions (since it doesn't know what resource type it's reconciling), so we need to check for condition
+	// errors and mark the conditions accordingly
 	keyPairable, ok, err := r.resolveIssuer(ctx, usr.Spec.Issuer, usr.Namespace)
 	if err != nil || !ok {
 		if cerr, ok := asConditionError(err); ok {
@@ -105,40 +105,40 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 			usr.Status.MarkIssuerResolveUnknown(v1alpha1.ReasonUnknownError, err.Error())
 		}
 
-        if ok {
-            return ctrl.Result{}, nil
-        }
+		if ok {
+			return ctrl.Result{}, nil
+		}
 
-        return ctrl.Result{}, err
+		return ctrl.Result{}, err
 	}
 
-    _, ok, err = r.resolveAccount(ctx, usr, keyPairable)
+	_, ok, err = r.resolveAccount(ctx, usr, keyPairable)
 	if err != nil || !ok {
 		logger.Error(err, "failed to ensure owner resolved")
 
-        return ctrl.Result{}, err
+		return ctrl.Result{}, err
 	}
 
-    logger.V(1).Info("reconciling user JWT secret")
+	logger.V(1).Info("reconciling user JWT secret")
 
-    ujwt, ok, err := r.reconcileJWTSecret(ctx, usr, keyPairable)
-    if err != nil || !ok {
-        logger.Error(err, "failed to reconcile user jwt secret")
+	ujwt, ok, err := r.reconcileJWTSecret(ctx, usr, keyPairable)
+	if err != nil || !ok {
+		logger.Error(err, "failed to reconcile user jwt secret")
 
-        if ok {
-            return ctrl.Result{}, nil
-        }
+		if ok {
+			return ctrl.Result{}, nil
+		}
 
-        return ctrl.Result{}, err
-    }
+		return ctrl.Result{}, err
+	}
 
-    logger.V(1).Info("reconciling user credential secret")
+	logger.V(1).Info("reconciling user credential secret")
 
-    if err := r.reconcileUserCredentialSecret(ctx, usr, ujwt, seed); err != nil {
-        logger.Error(err, "failed to reconcile user credential secret")
+	if err := r.reconcileUserCredentialSecret(ctx, usr, ujwt, seed); err != nil {
+		logger.Error(err, "failed to reconcile user credential secret")
 
-        return ctrl.Result{}, err
-    }
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -147,89 +147,88 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 // exists containing a valid keypair for the Account, updating it if it's not up-to-date and creating it if it doesn't
 // exist.
 func (r *UserReconciler) reconcileSeedSecret(ctx context.Context, usr *v1alpha1.User) (seed []byte, ok bool, err error) {
-    logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
-    got, err := r.CoreV1.Secrets(usr.Namespace).Get(ctx, usr.Spec.SeedSecretName, metav1.GetOptions{})
-    if err != nil {
-        if errors.IsNotFound(err) {
-            logger.V(1).Info("account seed secret not found, generating new keypair")
+	got, err := r.CoreV1.Secrets(usr.Namespace).Get(ctx, usr.Spec.SeedSecretName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("account seed secret not found, generating new keypair")
 
-            return r.createSeedSecret(ctx, usr)
-        }
+			return r.createSeedSecret(ctx, usr)
+		}
 
-        logger.Error(err, "failed to get account seed secret")
+		logger.Error(err, "failed to get account seed secret")
 
-        usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
 
-        return nil, false, err
-    }
+		return nil, false, err
+	}
 
-    kp, ok, err := r.ensureSeedSecretUpToDate(ctx, usr, got)
-    if err != nil || !ok {
-        if cerr, ok := asConditionError(err); ok {
-            cerr.MarkCondition(usr.Status.MarkSeedSecretFailed, usr.Status.MarkSeedSecretUnknown)
-        } else {
-            usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
-        }
+	kp, ok, err := r.ensureSeedSecretUpToDate(ctx, usr, got)
+	if err != nil || !ok {
+		if cerr, ok := asConditionError(err); ok {
+			cerr.MarkCondition(usr.Status.MarkSeedSecretFailed, usr.Status.MarkSeedSecretUnknown)
+		} else {
+			usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
+		}
 
-        return nil, ok, err
-    }
+		return nil, ok, err
+	}
 
-    seedBytes, _ := kp.Seed()
-    pubkey, _ := kp.PublicKey()
+	seedBytes, _ := kp.Seed()
+	pubkey, _ := kp.PublicKey()
 
-    usr.Status.MarkSeedSecretReady(pubkey, usr.Spec.SeedSecretName)
+	usr.Status.MarkSeedSecretReady(pubkey, usr.Spec.SeedSecretName)
 
-    return seedBytes, true, nil
+	return seedBytes, true, nil
 }
 
 func (r *UserReconciler) createSeedSecret(ctx context.Context, usr *v1alpha1.User) (seed []byte, ok bool, err error) {
-    logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
-    kp, err := nkeys.CreateUser()
-    if err != nil {
-        logger.Error(err, "failed to create user keypair")
+	kp, err := nkeys.CreateUser()
+	if err != nil {
+		logger.Error(err, "failed to create user keypair")
 
-        usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        return nil, false, err
-    }
+		return nil, false, err
+	}
 
-    secret, err := resources.NewKeyPairSecretBuilder(r.Scheme).Build(usr, kp)
-    if err != nil {
-        logger.Error(err, "failed to build user keypair secret")
+	secret, err := resources.NewKeyPairSecretBuilder(r.Scheme).Build(usr, kp)
+	if err != nil {
+		logger.Error(err, "failed to build user keypair secret")
 
-        usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        return nil, false, err
-    }
+		return nil, false, err
+	}
 
-    if err := r.Client.Create(ctx, secret); err != nil {
-        logger.Error(err, "failed to create user keypair secret")
+	if err := r.Client.Create(ctx, secret); err != nil {
+		logger.Error(err, "failed to create user keypair secret")
 
-        usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        return nil, false, err
-    }
+		return nil, false, err
+	}
 
-    r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "SeedSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
+	r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "SeedSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
 
-    pubkey, err := kp.PublicKey()
-    if err != nil {
-        logger.Error(err, "failed to get user public key")
+	pubkey, err := kp.PublicKey()
+	if err != nil {
+		logger.Error(err, "failed to get user public key")
 
-        usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        return nil, true, err
-    }
+		return nil, true, err
+	}
 
-    seedBytes, _ := kp.Seed()
+	seedBytes, _ := kp.Seed()
 
-    usr.Status.MarkSeedSecretReady(pubkey, secret.Name)
+	usr.Status.MarkSeedSecretReady(pubkey, secret.Name)
 
-    return seedBytes, true, nil
+	return seedBytes, true, nil
 }
-
 
 // resolveAccount handles the v1alpha1.UserConditionAccountResolved condition and updating the
 // .status.operatorRef field. If the provided keyPair is a SigningKey this will correctly resolve the owner to an
@@ -282,227 +281,226 @@ func (r *UserReconciler) resolveAccount(ctx context.Context, acc *v1alpha1.User,
 }
 
 func (r *UserReconciler) reconcileJWTSecret(ctx context.Context, usr *v1alpha1.User, keyPairable v1alpha1.KeyPairable) (string, bool, error) {
-    logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
-    issuerKP, ok, err := r.loadIssuerSeed(ctx, keyPairable, nkeys.PrefixByteAccount)
-    if err != nil || !ok {
-        if cerr, ok := asConditionError(err); ok {
-            cerr.MarkCondition(usr.Status.MarkIssuerResolveFailed, usr.Status.MarkIssuerResolveUnknown)
-        } else {
-            usr.Status.MarkIssuerResolveUnknown(v1alpha1.ReasonUnknownError, err.Error())
-        }
+	issuerKP, ok, err := r.loadIssuerSeed(ctx, keyPairable, nkeys.PrefixByteAccount)
+	if err != nil || !ok {
+		if cerr, ok := asConditionError(err); ok {
+			cerr.MarkCondition(usr.Status.MarkIssuerResolveFailed, usr.Status.MarkIssuerResolveUnknown)
+		} else {
+			usr.Status.MarkIssuerResolveUnknown(v1alpha1.ReasonUnknownError, err.Error())
+		}
 
-        return "", ok, err
-    }
+		return "", ok, err
+	}
 
-    usr.Status.MarkIssuerResolved()
+	usr.Status.MarkIssuerResolved()
 
-    // we want to check that any existing secret decodes to match wantClaims, if it doesn't then we will use nextJWT
-    // to create/update the secret. We cannot just compare the JWTs from the secret and accountJWT because the JWTs are
-    // timestamped with the `iat` claim so will never match.
-    wantClaims, nextJWT, err := nsc.CreateUserClaims(usr, issuerKP)
-    if err != nil {
-        usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+	// we want to check that any existing secret decodes to match wantClaims, if it doesn't then we will use nextJWT
+	// to create/update the secret. We cannot just compare the JWTs from the secret and accountJWT because the JWTs are
+	// timestamped with the `iat` claim so will never match.
+	wantClaims, nextJWT, err := nsc.CreateUserClaims(usr, issuerKP)
+	if err != nil {
+		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        return "", false, nil
-    }
+		return "", false, nil
+	}
 
-    got, err := r.CoreV1.Secrets(usr.Namespace).Get(ctx, usr.Spec.JWTSecretName, metav1.GetOptions{})
-    if err != nil {
-        if errors.IsNotFound(err) {
-            logger.Info("JWT secret not found, creating new secret")
+	got, err := r.CoreV1.Secrets(usr.Namespace).Get(ctx, usr.Spec.JWTSecretName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("JWT secret not found, creating new secret")
 
-            ok, err := r.createJWTSecret(ctx, usr, nextJWT)
-            if err != nil || !ok {
-                return "", ok, err
-            }
+			ok, err := r.createJWTSecret(ctx, usr, nextJWT)
+			if err != nil || !ok {
+				return "", ok, err
+			}
 
-            return nextJWT, true, nil
-        }
+			return nextJWT, true, nil
+		}
 
-        logger.Error(err, "failed to get JWT secret")
+		logger.Error(err, "failed to get JWT secret")
 
-        usr.Status.MarkJWTSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkJWTSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
 
-        return "", false, err
-    }
+		return "", false, err
+	}
 
-    return r.ensureJWTSecretUpToDate(ctx, usr, wantClaims, got, nextJWT)
+	return r.ensureJWTSecretUpToDate(ctx, usr, wantClaims, got, nextJWT)
 }
 
 func (r *UserReconciler) createJWTSecret(ctx context.Context, usr *v1alpha1.User, userJWT string) (bool, error) {
-    logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
-    secret, err := resources.NewJWTSecretBuilder(r.Scheme).Build(usr, userJWT)
-    if err != nil {
-        logger.Error(err, "failed to build account keypair secret")
+	secret, err := resources.NewJWTSecretBuilder(r.Scheme).Build(usr, userJWT)
+	if err != nil {
+		logger.Error(err, "failed to build account keypair secret")
 
-        usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        return true, err
-    }
+		return true, err
+	}
 
-    if err := r.Client.Create(ctx, secret); err != nil {
-        logger.Error(err, "failed to create account JWT secret")
+	if err := r.Client.Create(ctx, secret); err != nil {
+		logger.Error(err, "failed to create account JWT secret")
 
-        usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        // we shouldn't expect any errors here, so returning false will communicate up to the controller that this
-        // should be retried.
-        return false, err
-    }
+		// we shouldn't expect any errors here, so returning false will communicate up to the controller that this
+		// should be retried.
+		return false, err
+	}
 
-    r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "JWTSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
+	r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "JWTSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
 
-    return true, nil
+	return true, nil
 }
 
 // ensureJWTSecretUpToDate compares that the existing JWT secret decodes and matches the expected claims, if it does not
 // match the secret will be updated with the nextJWT value.
 func (r *UserReconciler) ensureJWTSecretUpToDate(ctx context.Context, usr *v1alpha1.User, wantClaims *jwt.UserClaims, got *v1.Secret, nextJWT string) (string, bool, error) {
-    logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
-    gotJWT, ok := got.Data[v1alpha1.NatsSecretJWTKey]
-    if !ok {
-        // TODO: should we be checking owner references here? If we own it then we should be okay to delete it, but if
-        //  not we tell the user to delete it manually, and they'll either do so, or update the spec to use a new name.
-        usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonInvalidJWTSecret, "JWT secret does not contain JWT data, delete the secret to generate a new JWT")
+	gotJWT, ok := got.Data[v1alpha1.NatsSecretJWTKey]
+	if !ok {
+		// TODO: should we be checking owner references here? If we own it then we should be okay to delete it, but if
+		//  not we tell the user to delete it manually, and they'll either do so, or update the spec to use a new name.
+		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonInvalidJWTSecret, "JWT secret does not contain JWT data, delete the secret to generate a new JWT")
 
-        return "", false, nil
-    }
+		return "", false, nil
+	}
 
-    gotClaims, err := jwt.Decode(string(gotJWT))
-    switch {
-    case err != nil:
-        logger.Info("failed to decode JWT from secret, updating to latest version", "reason", err.Error())
-    case !nsc.Equality.DeepEqual(gotClaims, wantClaims):
-        logger.V(1).Info("existing JWT secret does not match desired claims, updating to latest version")
-    default:
-        logger.V(1).Info("existing JWT secret matches desired claims, no update required")
+	gotClaims, err := jwt.Decode(string(gotJWT))
+	switch {
+	case err != nil:
+		logger.Info("failed to decode JWT from secret, updating to latest version", "reason", err.Error())
+	case !nsc.Equality.DeepEqual(gotClaims, wantClaims):
+		logger.V(1).Info("existing JWT secret does not match desired claims, updating to latest version")
+	default:
+		logger.V(1).Info("existing JWT secret matches desired claims, no update required")
 
-        usr.Status.MarkJWTSecretReady()
+		usr.Status.MarkJWTSecretReady()
 
-        return string(gotJWT), true, nil
-    }
+		return string(gotJWT), true, nil
+	}
 
-    want, err := resources.NewJWTSecretBuilderFromSecret(got, r.Scheme).Build(usr, nextJWT)
-    if err != nil {
-        logger.Error(err, "failed to build desired JWT secret")
+	want, err := resources.NewJWTSecretBuilderFromSecret(got, r.Scheme).Build(usr, nextJWT)
+	if err != nil {
+		logger.Error(err, "failed to build desired JWT secret")
 
-        usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
 
-        return "", true, err
-    }
+		return "", true, err
+	}
 
-    err = r.Client.Update(ctx, want)
-    if err != nil {
-        logger.Error(err, "failed to update JWT secret")
+	err = r.Client.Update(ctx, want)
+	if err != nil {
+		logger.Error(err, "failed to update JWT secret")
 
-        usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
 
-        return "", false, err
-    }
+		return "", false, err
+	}
 
-    r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "SeedSecretUpdated", "updated secret: %s/%s", want.Namespace, want.Name)
+	r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "SeedSecretUpdated", "updated secret: %s/%s", want.Namespace, want.Name)
 
-    usr.Status.MarkJWTSecretReady()
+	usr.Status.MarkJWTSecretReady()
 
-    return nextJWT, true, nil
+	return nextJWT, true, nil
 }
 
 func (r *UserReconciler) reconcileUserCredentialSecret(ctx context.Context, usr *v1alpha1.User, ujwt string, seed []byte) error {
-    logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
-    got, err := r.CoreV1.Secrets(usr.Namespace).Get(ctx, usr.Spec.CredentialsSecretName, metav1.GetOptions{})
-    if err != nil {
-        if errors.IsNotFound(err) {
-            logger.Info("credentials secret not found, creating new secret")
+	got, err := r.CoreV1.Secrets(usr.Namespace).Get(ctx, usr.Spec.CredentialsSecretName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("credentials secret not found, creating new secret")
 
-            if err := r.createCredentialsSecret(ctx, usr, ujwt, seed); err != nil {
-                return err
-            }
+			if err := r.createCredentialsSecret(ctx, usr, ujwt, seed); err != nil {
+				return err
+			}
 
-            return nil
-        }
+			return nil
+		}
 
-        logger.Error(err, "failed to get credentials secret")
+		logger.Error(err, "failed to get credentials secret")
 
-        usr.Status.MarkCredentialsSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkCredentialsSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
 
-        return err
-    }
+		return err
+	}
 
-    return r.ensureCredentialsSecretUpToDate(ctx, usr, ujwt, seed, got)
+	return r.ensureCredentialsSecretUpToDate(ctx, usr, ujwt, seed, got)
 }
 
 func (r *UserReconciler) createCredentialsSecret(ctx context.Context, usr *v1alpha1.User, ujwt string, seed []byte) error {
-    logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
-    secret, err := resources.NewUserCredentialSecretBuilder(r.Scheme).Build(usr, ujwt, seed)
-    if err != nil {
-        logger.Error(err, "failed to build credentials secret")
+	secret, err := resources.NewUserCredentialSecretBuilder(r.Scheme).Build(usr, ujwt, seed)
+	if err != nil {
+		logger.Error(err, "failed to build credentials secret")
 
-        usr.Status.MarkCredentialsSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkCredentialsSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        return err
-    }
+		return err
+	}
 
-    if err := r.Client.Create(ctx, secret); err != nil {
-        logger.Error(err, "failed to create credentials secret")
+	if err := r.Client.Create(ctx, secret); err != nil {
+		logger.Error(err, "failed to create credentials secret")
 
-        usr.Status.MarkCredentialsSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkCredentialsSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        return err
-    }
+		return err
+	}
 
-    usr.Status.MarkCredentialsSecretReady()
+	usr.Status.MarkCredentialsSecretReady()
 
-    r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "CredentialsSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
+	r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "CredentialsSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
 
-    return nil
+	return nil
 }
 
 func (r *UserReconciler) ensureCredentialsSecretUpToDate(ctx context.Context, usr *v1alpha1.User, ujwt string, seed []byte, got *v1.Secret) error {
-    logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
-    want, err := resources.NewUserCredentialSecretBuilderFromSecret(got.DeepCopy(), r.Scheme).Build(usr, ujwt, seed)
-    if err != nil {
-        err = fmt.Errorf("failed to build desired credentials secret: %w", err)
+	want, err := resources.NewUserCredentialSecretBuilderFromSecret(got.DeepCopy(), r.Scheme).Build(usr, ujwt, seed)
+	if err != nil {
+		err = fmt.Errorf("failed to build desired credentials secret: %w", err)
 
-        usr.Status.MarkCredentialsSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkCredentialsSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        return err
-    }
+		return err
+	}
 
-    if equality.Semantic.DeepEqual(got, want) {
-        logger.V(5).Info("existing credentials secret matches desired state, no update required")
+	if equality.Semantic.DeepEqual(got, want) {
+		logger.V(5).Info("existing credentials secret matches desired state, no update required")
 
-        usr.Status.MarkCredentialsSecretReady()
+		usr.Status.MarkCredentialsSecretReady()
 
-        return nil
-    }
+		return nil
+	}
 
-    if err := r.Update(ctx, want); err != nil {
-        err = fmt.Errorf("failed to update credentials secret: %w", err)
+	if err := r.Update(ctx, want); err != nil {
+		err = fmt.Errorf("failed to update credentials secret: %w", err)
 
-        usr.Status.MarkCredentialsSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+		usr.Status.MarkCredentialsSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        return err
-    }
+		return err
+	}
 
-    r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "CredentialsSecretUpdated", "updated secret: %s/%s", want.Namespace, want.Name)
+	r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "CredentialsSecretUpdated", "updated secret: %s/%s", want.Namespace, want.Name)
 
-    usr.Status.MarkCredentialsSecretReady()
+	usr.Status.MarkCredentialsSecretReady()
 
-    return nil
+	return nil
 }
-
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *UserReconciler) SetupWithManager(mgr ctrl.Manager) error {
-    r.EventRecorder = mgr.GetEventRecorderFor("user-controller")
+	r.EventRecorder = mgr.GetEventRecorderFor("user-controller")
 
-    return ctrl.NewControllerManagedBy(mgr).
+	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.User{}).
 		Owns(&v1.Secret{}).
 		Complete(r)

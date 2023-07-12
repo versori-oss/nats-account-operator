@@ -13,7 +13,7 @@ const (
 
 var operatorConditionSet = apis.NewLivingConditionSet(
 	OperatorConditionReady,
-    KeyPairableConditionSeedSecretReady,
+	KeyPairableConditionSeedSecretReady,
 	OperatorConditionSystemAccountResolved,
 	OperatorConditionSystemAccountReady,
 	OperatorConditionSigningKeysUpdated,

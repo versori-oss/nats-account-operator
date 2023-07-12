@@ -117,12 +117,12 @@ func (r *BaseReconciler) resolveIssuer(ctx context.Context, issuer v1alpha1.Issu
 			v1alpha1.ReasonUnsupportedIssuer, "issuer does not implement KeyPairable interface")
 	}
 
-    conditions := keyPairable.GetConditionSet().Manage(keyPairable.GetStatus())
+	conditions := keyPairable.GetConditionSet().Manage(keyPairable.GetStatus())
 
-    // Initialize the conditions if they are not already set, not doing this causes a nil-pointer dereference panic
-    conditions.InitializeConditions()
+	// Initialize the conditions if they are not already set, not doing this causes a nil-pointer dereference panic
+	conditions.InitializeConditions()
 
-    seedReadyCondition := conditions.GetCondition(v1alpha1.KeyPairableConditionSeedSecretReady)
+	seedReadyCondition := conditions.GetCondition(v1alpha1.KeyPairableConditionSeedSecretReady)
 	if !seedReadyCondition.IsTrue() {
 		logger.V(1).Info("issuer seed secret is not ready", "issuer_type", fmt.Sprintf("%T", issuer), "reason", seedReadyCondition.Reason, "message", seedReadyCondition.Message)
 

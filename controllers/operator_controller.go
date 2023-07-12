@@ -89,7 +89,7 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 
 	originalStatus := operator.Status.DeepCopy()
 
-    operator.Status.InitializeConditions()
+	operator.Status.InitializeConditions()
 
 	defer func() {
 		if !equality.Semantic.DeepEqual(originalStatus, operator.Status) {
@@ -331,7 +331,7 @@ func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, op
 		}, operator.Spec.SystemAccountRef.Name)
 	}
 
-    operator.Status.MarkSystemAccountReady()
+	operator.Status.MarkSystemAccountReady()
 
 	return sysAcc.Status.KeyPair.PublicKey, nil
 }

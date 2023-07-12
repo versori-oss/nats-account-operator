@@ -1,11 +1,10 @@
 package resources
 
 const (
-    AnnotationSecretJWTType = "nats.accounts.io/jwt-type"
+	AnnotationSecretJWTType = "nats.accounts.io/jwt-type"
 
-    AnnotationSecretTypeUser = "user"
-    AnnotationSecretTypeAccount = "account"
+	AnnotationSecretTypeUser    = "user"
+	AnnotationSecretTypeAccount = "account"
 
-    LabelJWTSubject = "nats.accounts.io/subject"
-
+	LabelJWTSubject = "nats.accounts.io/subject"
 )
