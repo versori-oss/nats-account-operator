@@ -1,13 +1,12 @@
 package resources
 
 import (
-	"fmt"
-	"github.com/nats-io/nkeys"
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+    "fmt"
+    "github.com/nats-io/nkeys"
+    "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+    v1 "k8s.io/api/core/v1"
+    "k8s.io/apimachinery/pkg/runtime"
+    "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type KeyPairSecretBuilder struct {
@@ -59,10 +58,6 @@ func (b *KeyPairSecretBuilder) Build(obj client.Object, kp nkeys.KeyPair) (*v1.S
 	b.secret.Data = map[string][]byte{
 		v1alpha1.NatsSecretSeedKey:      seed,
 		v1alpha1.NatsSecretPublicKeyKey: []byte(pubkey),
-	}
-
-	if err = controllerutil.SetControllerReference(obj, b.secret, b.scheme); err != nil {
-		return nil, err
 	}
 
 	return b.secret, nil

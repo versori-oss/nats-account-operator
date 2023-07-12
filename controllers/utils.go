@@ -1,6 +1,8 @@
 package controllers
 
-import "k8s.io/utils/strings/slices"
+import (
+	"k8s.io/utils/strings/slices"
+)
 
 // isEqualUnordered compares two string slices and returns true if they contain the same
 // elements, regardless of order. Returns false otherwise, or if they are of different length.

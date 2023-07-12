@@ -6,7 +6,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 type JWTSecretBuilder struct {
@@ -47,10 +46,6 @@ func (b *JWTSecretBuilder) Build(obj client.Object, jwt string) (*v1.Secret, err
 	b.secret.Namespace = obj.GetNamespace()
 	b.secret.Data = map[string][]byte{
 		v1alpha1.NatsSecretJWTKey: []byte(jwt),
-	}
-
-	if err := controllerutil.SetControllerReference(obj, b.secret, b.scheme); err != nil {
-		return nil, err
 	}
 
 	return b.secret, nil
