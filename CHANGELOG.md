@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/versori-oss/nats-account-operator/compare/v0.1.1...v0.1.2) (2023-07-12)
+
+
+### Bug Fixes
+
+* **owners:** only add owner references to resources created by the controller ([1dd9aa8](https://github.com/versori-oss/nats-account-operator/commit/1dd9aa883c66b3e2bf52b71f990cff133b3a4173))
+* **tls-config:** NATS connections can be configured with a CA from a literal byte slice rather than a file ([34a5526](https://github.com/versori-oss/nats-account-operator/commit/34a55265172f18775c97f6b7f8f9391c093fd641))
+
 ## [0.1.1](https://github.com/versori-oss/nats-account-operator/compare/v0.1.0...v0.1.1) (2023-07-12)
 
 
