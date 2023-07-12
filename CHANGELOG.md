@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/versori-oss/nats-account-operator/compare/v0.1.0...v0.1.1) (2023-07-12)
+
+
+### Features
+
+* **operator:** ability to define CA certificate for connecting to NATS ([c0c06de](https://github.com/versori-oss/nats-account-operator/commit/c0c06de5ca81c0a0d9b6df10927a63acd1a44784))
+
 ## 0.1.0 (2023-07-11)
 
 
