@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/versori-oss/nats-account-operator/compare/v0.1.2...v0.2.0) (2023-07-13)
+
+
+### Features
+
+* add ca.crt to the user creds secrets (conv. commit for CI) ([7f4f35c](https://github.com/versori-oss/nats-account-operator/commit/7f4f35c9bbbf0a5b518dddabd6d1211562a5a18c))
+
 ## [0.1.2](https://github.com/versori-oss/nats-account-operator/compare/v0.1.1...v0.1.2) (2023-07-12)
 
 
