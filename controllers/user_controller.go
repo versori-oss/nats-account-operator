@@ -431,6 +431,10 @@ func (r *UserReconciler) getCAIfExists(ctx context.Context, acc *v1alpha1.Accoun
 
 	s, err := r.CoreV1.Secrets(op.Namespace).Get(ctx, op.Spec.TLSConfig.CAFile.Name, metav1.GetOptions{})
 	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.Error(err, "could not find secret")
+			return nil, errInternalNotFound
+		}
 		return nil, err
 	}
 
