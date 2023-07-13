@@ -409,7 +409,6 @@ func (r *UserReconciler) ensureJWTSecretUpToDate(ctx context.Context, usr *v1alp
 }
 
 func (r *UserReconciler) getCAIfExists(ctx context.Context, acc *v1alpha1.Account) ([]byte, error) {
-	sClient := r.CoreV1.Secrets(acc.Namespace)
 	logger := log.FromContext(ctx)
 
 	if acc.Status.OperatorRef == nil {
@@ -430,7 +429,7 @@ func (r *UserReconciler) getCAIfExists(ctx context.Context, acc *v1alpha1.Accoun
 		return nil, errInternalNotFound
 	}
 
-	s, err := sClient.Get(ctx, op.Spec.TLSConfig.CAFile.Name, metav1.GetOptions{})
+	s, err := r.CoreV1.Secrets(op.Namespace).Get(ctx, op.Spec.TLSConfig.CAFile.Name, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
