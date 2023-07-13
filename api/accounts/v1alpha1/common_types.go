@@ -16,6 +16,7 @@ const (
 const (
 	NatsSecretJWTKey       = "nats.jwt"
 	NatsSecretCredsKey     = "nats.creds"
+	NatsCAKey              = "ca.crt"
 	NatsSecretSeedKey      = "seed.nk"
 	NatsSecretPublicKeyKey = "public.nk"
 )

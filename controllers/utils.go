@@ -1,8 +1,12 @@
 package controllers
 
 import (
+	"errors"
+
 	"k8s.io/utils/strings/slices"
 )
+
+var errInternalNotFound = errors.New("resource not found")
 
 // isEqualUnordered compares two string slices and returns true if they contain the same
 // elements, regardless of order. Returns false otherwise, or if they are of different length.

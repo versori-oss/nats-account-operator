@@ -12,19 +12,22 @@ import (
 type UserCredentialSecretBuilder struct {
 	scheme *runtime.Scheme
 	secret *corev1.Secret
+	ca     []byte
 }
 
-func NewUserCredentialSecretBuilder(scheme *runtime.Scheme) *UserCredentialSecretBuilder {
+func NewUserCredentialSecretBuilder(scheme *runtime.Scheme, ca []byte) *UserCredentialSecretBuilder {
 	return &UserCredentialSecretBuilder{
 		scheme: scheme,
 		secret: &corev1.Secret{},
+		ca:     ca,
 	}
 }
 
-func NewUserCredentialSecretBuilderFromSecret(s *corev1.Secret, scheme *runtime.Scheme) *UserCredentialSecretBuilder {
+func NewUserCredentialSecretBuilderFromSecret(s *corev1.Secret, scheme *runtime.Scheme, ca []byte) *UserCredentialSecretBuilder {
 	return &UserCredentialSecretBuilder{
 		scheme: scheme,
 		secret: s,
+		ca:     ca,
 	}
 }
 
@@ -56,6 +59,7 @@ func (b *UserCredentialSecretBuilder) Build(usr *v1alpha1.User, ujwt string, see
 	b.secret.Namespace = usr.GetNamespace()
 	b.secret.Data = map[string][]byte{
 		v1alpha1.NatsSecretCredsKey: creds,
+		v1alpha1.NatsCAKey:          b.ca,
 	}
 
 	if err = controllerutil.SetControllerReference(usr, b.secret, b.scheme); err != nil {

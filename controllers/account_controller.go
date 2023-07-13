@@ -320,15 +320,15 @@ func (r *AccountReconciler) createSeedSecret(ctx context.Context, acc *v1alpha1.
 		return err
 	}
 
-    if err = controllerutil.SetControllerReference(acc, secret, r.Scheme); err != nil {
-        logger.Error(err, "failed to set account keypair secret controller reference")
+	if err = controllerutil.SetControllerReference(acc, secret, r.Scheme); err != nil {
+		logger.Error(err, "failed to set account keypair secret controller reference")
 
-        acc.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
+		acc.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-        return err
-    }
+		return err
+	}
 
-    if err := r.Client.Create(ctx, secret); err != nil {
+	if err := r.Client.Create(ctx, secret); err != nil {
 		logger.Error(err, "failed to create account keypair secret")
 
 		acc.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
