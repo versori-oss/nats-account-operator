@@ -28,22 +28,21 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"github.com/versori-oss/nats-account-operator/controllers/resources"
-	"k8s.io/client-go/tools/record"
 
+	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nkeys"
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/controllers/resources"
+	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	"github.com/nats-io/jwt/v2"
-	"github.com/nats-io/nkeys"
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
-	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 // UserReconciler reconciles a User object
@@ -112,7 +111,7 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 		return ctrl.Result{}, err
 	}
 
-	_, ok, err = r.resolveAccount(ctx, usr, keyPairable)
+	acc, ok, err := r.resolveAccount(ctx, usr, keyPairable)
 	if err != nil || !ok {
 		logger.Error(err, "failed to ensure owner resolved")
 
@@ -134,7 +133,7 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 
 	logger.V(1).Info("reconciling user credential secret")
 
-	if err := r.reconcileUserCredentialSecret(ctx, usr, ujwt, seed); err != nil {
+	if err := r.reconcileUserCredentialSecret(ctx, usr, acc, ujwt, seed); err != nil {
 		logger.Error(err, "failed to reconcile user credential secret")
 
 		return ctrl.Result{}, err
@@ -409,15 +408,60 @@ func (r *UserReconciler) ensureJWTSecretUpToDate(ctx context.Context, usr *v1alp
 	return nextJWT, true, nil
 }
 
-func (r *UserReconciler) reconcileUserCredentialSecret(ctx context.Context, usr *v1alpha1.User, ujwt string, seed []byte) error {
+func (r *UserReconciler) getCAIfExists(ctx context.Context, acc *v1alpha1.Account) ([]byte, error) {
+	sClient := r.CoreV1.Secrets(acc.Namespace)
 	logger := log.FromContext(ctx)
+
+	if acc.Status.OperatorRef == nil {
+		logger.Info("accounts has nil operator ref")
+		return nil, errInternalNotFound
+	}
+
+	operatorRef := acc.Status.OperatorRef
+
+	opClient := r.AccountsClientSet.Operators(operatorRef.Namespace)
+	op, err := opClient.Get(ctx, operatorRef.Name, metav1.GetOptions{})
+	if err != nil {
+		logger.Error(err, "failed to retrieve the operator for account")
+		return nil, err
+	}
+
+	if op.Spec.TLSConfig == nil {
+		return nil, errInternalNotFound
+	}
+
+	s, err := sClient.Get(ctx, op.Spec.TLSConfig.CAFile.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	caData, ok := s.Data[op.Spec.TLSConfig.CAFile.Key]
+	if !ok {
+		logger.Info("CA key not found in secret", "secret", fmt.Sprintf("%s/%s", acc.Spec.Issuer.Ref.Namespace, op.Spec.TLSConfig.CAFile.Name))
+		return nil, errInternalNotFound
+	}
+
+	return caData, nil
+}
+
+func (r *UserReconciler) reconcileUserCredentialSecret(ctx context.Context, usr *v1alpha1.User, acc *v1alpha1.Account, ujwt string, seed []byte) error {
+	logger := log.FromContext(ctx)
+
+	ca, err := r.getCAIfExists(ctx, acc)
+	switch {
+	case err == nil:
+	case err == errInternalNotFound:
+		logger.Info("no TLS config found for account operator")
+	default:
+		return err
+	}
 
 	got, err := r.CoreV1.Secrets(usr.Namespace).Get(ctx, usr.Spec.CredentialsSecretName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("credentials secret not found, creating new secret")
 
-			if err := r.createCredentialsSecret(ctx, usr, ujwt, seed); err != nil {
+			if err := r.createCredentialsSecret(ctx, usr, ujwt, seed, ca); err != nil {
 				return err
 			}
 
@@ -431,13 +475,13 @@ func (r *UserReconciler) reconcileUserCredentialSecret(ctx context.Context, usr 
 		return err
 	}
 
-	return r.ensureCredentialsSecretUpToDate(ctx, usr, ujwt, seed, got)
+	return r.ensureCredentialsSecretUpToDate(ctx, usr, ujwt, seed, got, ca)
 }
 
-func (r *UserReconciler) createCredentialsSecret(ctx context.Context, usr *v1alpha1.User, ujwt string, seed []byte) error {
+func (r *UserReconciler) createCredentialsSecret(ctx context.Context, usr *v1alpha1.User, ujwt string, seed []byte, ca []byte) error {
 	logger := log.FromContext(ctx)
 
-	secret, err := resources.NewUserCredentialSecretBuilder(r.Scheme).Build(usr, ujwt, seed)
+	secret, err := resources.NewUserCredentialSecretBuilder(r.Scheme, ca).Build(usr, ujwt, seed)
 	if err != nil {
 		logger.Error(err, "failed to build credentials secret")
 
@@ -461,10 +505,10 @@ func (r *UserReconciler) createCredentialsSecret(ctx context.Context, usr *v1alp
 	return nil
 }
 
-func (r *UserReconciler) ensureCredentialsSecretUpToDate(ctx context.Context, usr *v1alpha1.User, ujwt string, seed []byte, got *v1.Secret) error {
+func (r *UserReconciler) ensureCredentialsSecretUpToDate(ctx context.Context, usr *v1alpha1.User, ujwt string, seed []byte, got *v1.Secret, ca []byte) error {
 	logger := log.FromContext(ctx)
 
-	want, err := resources.NewUserCredentialSecretBuilderFromSecret(got.DeepCopy(), r.Scheme).Build(usr, ujwt, seed)
+	want, err := resources.NewUserCredentialSecretBuilderFromSecret(got.DeepCopy(), r.Scheme, ca).Build(usr, ujwt, seed)
 	if err != nil {
 		err = fmt.Errorf("failed to build desired credentials secret: %w", err)
 
