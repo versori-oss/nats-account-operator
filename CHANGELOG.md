@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/versori-oss/nats-account-operator/compare/v0.2.0...v0.2.1) (2023-07-14)
+
+
+### Bug Fixes
+
+* use operator namespace when reading the TLS secret ([8b90bdb](https://github.com/versori-oss/nats-account-operator/commit/8b90bdb738b2e79cf7e3958bdfbda925134f2aaa))
+
 ## [0.2.0](https://github.com/versori-oss/nats-account-operator/compare/v0.1.2...v0.2.0) (2023-07-13)
 
 
