@@ -28,6 +28,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+
 	"github.com/nats-io/nats.go"
 	"github.com/versori-oss/nats-account-operator/controllers/resources"
 	"github.com/versori-oss/nats-account-operator/pkg/helpers"
@@ -178,13 +179,8 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 		return ctrl.Result{}, err
 	}
 
-	if !helpers.IsSystemAccount(acc, operator) {
-		if err := r.ensureJWTPushed(ctx, acc, operator, issuerKP, accountJWT); err != nil {
-			return ctrl.Result{}, err
-		}
-	} else {
-		// system accounts need the condition to be set to true to enable them to be considered "ready"
-		acc.Status.MarkJWTPushed()
+	if err := r.ensureJWTPushed(ctx, acc, operator, issuerKP, accountJWT); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
