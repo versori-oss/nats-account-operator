@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/versori-oss/nats-account-operator/compare/v0.2.1...v0.2.2) (2023-08-08)
+
+
+### Bug Fixes
+
+* Push  all acounts JWT to nats ([6f10bd8](https://github.com/versori-oss/nats-account-operator/commit/6f10bd8b4138b0aadf79daf26afea5e08c7d3ad4))
+
 ## [0.2.1](https://github.com/versori-oss/nats-account-operator/compare/v0.2.0...v0.2.1) (2023-07-14)
 
 
