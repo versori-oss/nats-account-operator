@@ -28,14 +28,12 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/controllers/resources"
-	"github.com/versori-oss/nats-account-operator/pkg/apis"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/pkg/helpers"
 	"github.com/versori-oss/nats-account-operator/pkg/nsc"
@@ -856,43 +854,6 @@ func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	if err != nil {
 		return err
-	}
-
-	return nil
-}
-
-func statusEquals(old, new v1alpha1.AccountStatus) bool {
-	if !reflect.DeepEqual(old.KeyPair, new.KeyPair) {
-		return false
-	}
-
-	if !reflect.DeepEqual(old.OperatorRef, new.OperatorRef) {
-		return false
-	}
-
-	for _, con := range old.Conditions {
-		s := getStatus(new, string(con.Type))
-
-		// missing status so we have to update
-		if s == nil {
-			return false
-		}
-
-		if s.Status != con.Status && s.Reason != con.Reason && s.Message != con.Message {
-			return false
-		}
-
-	}
-
-	return true
-}
-
-func getStatus(acc v1alpha1.AccountStatus, conditionType string) *apis.Condition {
-	for _, con := range acc.Conditions {
-		if string(con.Type) == conditionType {
-			return &con
-		}
-
 	}
 
 	return nil
