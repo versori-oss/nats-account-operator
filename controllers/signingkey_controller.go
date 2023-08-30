@@ -88,7 +88,7 @@ func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	signingKey.Status.InitializeConditions()
 
 	defer func() {
-		if !equality.Semantic.DeepEqual(originalStatus, signingKey.Status) {
+		if !equality.Semantic.DeepEqual(*originalStatus, signingKey.Status) {
 			if err2 := r.Status().Update(ctx, signingKey); err2 != nil {
 				logger.Error(err2, "failed to update signing key status")
 

@@ -79,7 +79,7 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 	usr.Status.InitializeConditions()
 
 	defer func() {
-		if !equality.Semantic.DeepEqual(originalStatus, usr.Status) {
+		if !equality.Semantic.DeepEqual(*originalStatus, usr.Status) {
 			if err2 := r.Status().Update(ctx, usr); err2 != nil {
 				logger.Info("failed to update user status", "error", err2.Error())
 

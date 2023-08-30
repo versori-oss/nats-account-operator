@@ -29,30 +29,28 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nkeys"
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/controllers/resources"
+	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/pkg/helpers"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 	"go.uber.org/multierr"
-	"k8s.io/apimachinery/pkg/labels"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-
-	"github.com/nats-io/jwt/v2"
-	"github.com/nats-io/nkeys"
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
-	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 const AccountFinalizer = "accounts.nats.io/finalizer"
@@ -93,7 +91,7 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	acc.Status.InitializeConditions()
 
 	defer func() {
-		if !equality.Semantic.DeepEqual(originalStatus, acc.Status) {
+		if !equality.Semantic.DeepEqual(*originalStatus, acc.Status) {
 			if err2 := r.Status().Update(ctx, acc); err2 != nil {
 				logger.Info("failed to update account status", "error", err2.Error(), "account_name", acc.Name, "account_namespace", acc.Namespace)
 
