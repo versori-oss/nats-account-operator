@@ -28,31 +28,31 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nkeys"
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/controllers/resources"
+	"github.com/versori-oss/nats-account-operator/pkg/apis"
+	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/pkg/helpers"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 	"go.uber.org/multierr"
-	"k8s.io/apimachinery/pkg/labels"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-
-	"github.com/nats-io/jwt/v2"
-	"github.com/nats-io/nkeys"
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
-	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 const AccountFinalizer = "accounts.nats.io/finalizer"
@@ -93,7 +93,7 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	acc.Status.InitializeConditions()
 
 	defer func() {
-		if !equality.Semantic.DeepEqual(originalStatus, acc.Status) {
+		if !equality.Semantic.DeepEqual(*originalStatus, acc.Status) {
 			if err2 := r.Status().Update(ctx, acc); err2 != nil {
 				logger.Info("failed to update account status", "error", err2.Error(), "account_name", acc.Name, "account_namespace", acc.Namespace)
 
@@ -856,6 +856,43 @@ func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	if err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func statusEquals(old, new v1alpha1.AccountStatus) bool {
+	if !reflect.DeepEqual(old.KeyPair, new.KeyPair) {
+		return false
+	}
+
+	if !reflect.DeepEqual(old.OperatorRef, new.OperatorRef) {
+		return false
+	}
+
+	for _, con := range old.Conditions {
+		s := getStatus(new, string(con.Type))
+
+		// missing status so we have to update
+		if s == nil {
+			return false
+		}
+
+		if s.Status != con.Status && s.Reason != con.Reason && s.Message != con.Message {
+			return false
+		}
+
+	}
+
+	return true
+}
+
+func getStatus(acc v1alpha1.AccountStatus, conditionType string) *apis.Condition {
+	for _, con := range acc.Conditions {
+		if string(con.Type) == conditionType {
+			return &con
+		}
+
 	}
 
 	return nil
