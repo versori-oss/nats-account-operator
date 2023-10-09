@@ -57,15 +57,15 @@ func (s *UserStatus) MarkAccountResolveUnknown(reason, messageFormat string, mes
 }
 
 func (s *UserStatus) MarkIssuerResolved() {
-	accountConditionSet.Manage(s).MarkTrue(UserConditionIssuerResolved)
+	userConditionSet.Manage(s).MarkTrue(UserConditionIssuerResolved)
 }
 
 func (s *UserStatus) MarkIssuerResolveFailed(reason, messageFormat string, messageA ...interface{}) {
-	accountConditionSet.Manage(s).MarkFalse(UserConditionIssuerResolved, reason, messageFormat, messageA...)
+	userConditionSet.Manage(s).MarkFalse(UserConditionIssuerResolved, reason, messageFormat, messageA...)
 }
 
 func (s *UserStatus) MarkIssuerResolveUnknown(reason, messageFormat string, messageA ...interface{}) {
-	accountConditionSet.Manage(s).MarkUnknown(UserConditionIssuerResolved, reason, messageFormat, messageA...)
+	userConditionSet.Manage(s).MarkUnknown(UserConditionIssuerResolved, reason, messageFormat, messageA...)
 }
 
 func (s *UserStatus) MarkJWTSecretReady() {
