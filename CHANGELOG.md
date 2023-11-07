@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.3](https://github.com/versori-oss/nats-account-operator/compare/v0.2.2...v0.2.3) (2023-11-07)
+
+
+### Bug Fixes
+
+* Don't compare pointer and struct because they are not equal ([0537e0c](https://github.com/versori-oss/nats-account-operator/commit/0537e0c9aa5b3916db79c262ca9a5d58b6d7a57a))
+* update dependencies ([d6b3d8c](https://github.com/versori-oss/nats-account-operator/commit/d6b3d8c00208e3a64a7c0625ebf2515fafb3fce7))
+* Update go version in CI ([b5acd29](https://github.com/versori-oss/nats-account-operator/commit/b5acd292f71ac905be761d368bca5d0ca508709f))
+* user user condition set for user and not account set ([77879db](https://github.com/versori-oss/nats-account-operator/commit/77879db41faae3d534c3af9e588ac2c2b24620ac))
+
 ## [0.2.2](https://github.com/versori-oss/nats-account-operator/compare/v0.2.1...v0.2.2) (2023-08-08)
 
 
