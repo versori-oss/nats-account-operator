@@ -26,23 +26,24 @@ SOFTWARE.
 package controllers
 
 import (
-	"context"
-	"fmt"
+    "context"
+    "fmt"
 
-	"github.com/nats-io/jwt/v2"
-	"github.com/nats-io/nkeys"
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-	"github.com/versori-oss/nats-account-operator/controllers/resources"
-	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
-	"github.com/versori-oss/nats-account-operator/pkg/nsc"
-	"go.uber.org/multierr"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+    "github.com/nats-io/jwt/v2"
+    "github.com/nats-io/nkeys"
+    "go.uber.org/multierr"
+    v1 "k8s.io/api/core/v1"
+    "k8s.io/apimachinery/pkg/api/equality"
+    "k8s.io/apimachinery/pkg/api/errors"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "k8s.io/client-go/tools/record"
+    ctrl "sigs.k8s.io/controller-runtime"
+    "sigs.k8s.io/controller-runtime/pkg/log"
+
+    "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+    "github.com/versori-oss/nats-account-operator/controllers/resources"
+    accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
+    "github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 // UserReconciler reconciles a User object
@@ -88,47 +89,35 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 		}
 	}()
 
-	seed, ok, err := r.reconcileSeedSecret(ctx, usr)
-	if err != nil || !ok {
-		return ctrl.Result{}, err
+	seed,err := r.reconcileSeedSecret(ctx, usr)
+	if err != nil {
+		return AsResult(err)
 	}
 
 	// get the KeyPairable which will be used to sign the JWT, resolveIssuer is part of BaseReconciler which doesn't
 	// mark conditions (since it doesn't know what resource type it's reconciling), so we need to check for condition
 	// errors and mark the conditions accordingly
-	keyPairable, ok, err := r.resolveIssuer(ctx, usr.Spec.Issuer, usr.Namespace)
-	if err != nil || !ok {
-		if cerr, ok := asConditionError(err); ok {
-			cerr.MarkCondition(usr.Status.MarkIssuerResolveFailed, usr.Status.MarkIssuerResolveUnknown)
-		} else {
-			usr.Status.MarkIssuerResolveUnknown(v1alpha1.ReasonUnknownError, err.Error())
-		}
+	keyPairable, err := r.resolveIssuer(ctx, usr.Spec.Issuer, usr.Namespace)
+	if err != nil {
+        MarkCondition(err, usr.Status.MarkIssuerResolveFailed, usr.Status.MarkIssuerResolveUnknown)
 
-		if ok {
-			return ctrl.Result{}, nil
-		}
-
-		return ctrl.Result{}, err
+        return AsResult(err)
 	}
 
-	acc, ok, err := r.resolveAccount(ctx, usr, keyPairable)
-	if err != nil || !ok {
+	acc, err := r.resolveAccount(ctx, usr, keyPairable)
+	if err != nil {
 		logger.Error(err, "failed to ensure owner resolved")
 
-		return ctrl.Result{}, err
+		return AsResult(err)
 	}
 
 	logger.V(1).Info("reconciling user JWT secret")
 
-	ujwt, ok, err := r.reconcileJWTSecret(ctx, usr, keyPairable)
-	if err != nil || !ok {
+	ujwt, err := r.reconcileJWTSecret(ctx, usr, keyPairable)
+	if err != nil {
 		logger.Error(err, "failed to reconcile user jwt secret")
 
-		if ok {
-			return ctrl.Result{}, nil
-		}
-
-		return ctrl.Result{}, err
+		return AsResult(err)
 	}
 
 	logger.V(1).Info("reconciling user credential secret")
@@ -145,7 +134,7 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 // reconcileSeedSecret handles the v1alpha1.KeyPairableConditionSeedSecretReady condition. It ensures that a secret
 // exists containing a valid keypair for the Account, updating it if it's not up-to-date and creating it if it doesn't
 // exist.
-func (r *UserReconciler) reconcileSeedSecret(ctx context.Context, usr *v1alpha1.User) (seed []byte, ok bool, err error) {
+func (r *UserReconciler) reconcileSeedSecret(ctx context.Context, usr *v1alpha1.User) (seed []byte, err error) {
 	logger := log.FromContext(ctx)
 
 	got, err := r.CoreV1.Secrets(usr.Namespace).Get(ctx, usr.Spec.SeedSecretName, metav1.GetOptions{})
@@ -160,18 +149,14 @@ func (r *UserReconciler) reconcileSeedSecret(ctx context.Context, usr *v1alpha1.
 
 		usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
 
-		return nil, false, err
+		return nil, TemporaryError(err)
 	}
 
-	kp, ok, err := r.ensureSeedSecretUpToDate(ctx, usr, got)
-	if err != nil || !ok {
-		if cerr, ok := asConditionError(err); ok {
-			cerr.MarkCondition(usr.Status.MarkSeedSecretFailed, usr.Status.MarkSeedSecretUnknown)
-		} else {
-			usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
-		}
+	kp, err := r.ensureSeedSecretUpToDate(ctx, usr, got)
+	if err != nil {
+        MarkCondition(err, usr.Status.MarkSeedSecretFailed, usr.Status.MarkSeedSecretUnknown)
 
-		return nil, ok, err
+		return nil, err
 	}
 
 	seedBytes, _ := kp.Seed()
@@ -179,10 +164,10 @@ func (r *UserReconciler) reconcileSeedSecret(ctx context.Context, usr *v1alpha1.
 
 	usr.Status.MarkSeedSecretReady(pubkey, usr.Spec.SeedSecretName)
 
-	return seedBytes, true, nil
+	return seedBytes, nil
 }
 
-func (r *UserReconciler) createSeedSecret(ctx context.Context, usr *v1alpha1.User) (seed []byte, ok bool, err error) {
+func (r *UserReconciler) createSeedSecret(ctx context.Context, usr *v1alpha1.User) (seed []byte, err error) {
 	logger := log.FromContext(ctx)
 
 	kp, err := nkeys.CreateUser()
@@ -191,7 +176,7 @@ func (r *UserReconciler) createSeedSecret(ctx context.Context, usr *v1alpha1.Use
 
 		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-		return nil, false, err
+		return nil, TemporaryError(err)
 	}
 
 	secret, err := resources.NewKeyPairSecretBuilder(r.Scheme).Build(usr, kp)
@@ -200,7 +185,7 @@ func (r *UserReconciler) createSeedSecret(ctx context.Context, usr *v1alpha1.Use
 
 		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-		return nil, false, err
+		return nil, TemporaryError(err)
 	}
 
 	if err := r.Client.Create(ctx, secret); err != nil {
@@ -208,7 +193,7 @@ func (r *UserReconciler) createSeedSecret(ctx context.Context, usr *v1alpha1.Use
 
 		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-		return nil, false, err
+		return nil, TemporaryError(err)
 	}
 
 	r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "SeedSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
@@ -219,20 +204,20 @@ func (r *UserReconciler) createSeedSecret(ctx context.Context, usr *v1alpha1.Use
 
 		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-		return nil, true, err
+		return nil, TemporaryError(err)
 	}
 
 	seedBytes, _ := kp.Seed()
 
 	usr.Status.MarkSeedSecretReady(pubkey, secret.Name)
 
-	return seedBytes, true, nil
+	return seedBytes, nil
 }
 
 // resolveAccount handles the v1alpha1.UserConditionAccountResolved condition and updating the
 // .status.operatorRef field. If the provided keyPair is a SigningKey this will correctly resolve the owner to an
 // Operator.
-func (r *UserReconciler) resolveAccount(ctx context.Context, acc *v1alpha1.User, keyPair v1alpha1.KeyPairable) (account *v1alpha1.Account, ok bool, err error) {
+func (r *UserReconciler) resolveAccount(ctx context.Context, acc *v1alpha1.User, keyPair v1alpha1.KeyPairable) (account *v1alpha1.Account, err error) {
 	logger := log.FromContext(ctx)
 
 	switch v := keyPair.(type) {
@@ -243,32 +228,26 @@ func (r *UserReconciler) resolveAccount(ctx context.Context, acc *v1alpha1.User,
 	case *v1alpha1.SigningKey:
 		logger.V(1).Info("user issuer is a signing key, resolving owner")
 
-		owner, ok, err := r.resolveSigningKeyOwner(ctx, v)
-		if err != nil || !ok {
-			if cerr, ok := asConditionError(err); ok {
-				cerr.MarkCondition(acc.Status.MarkAccountResolveFailed, acc.Status.MarkAccountResolveUnknown)
-			} else {
-				acc.Status.MarkAccountResolveUnknown(v1alpha1.ReasonUnknownError, err.Error())
-			}
+		owner, err := r.resolveSigningKeyOwner(ctx, v)
+		if err != nil {
+            MarkCondition(err, acc.Status.MarkAccountResolveFailed, acc.Status.MarkAccountResolveUnknown)
 
-			if ok {
-				return nil, true, nil
-			}
-
-			return nil, false, err
+			return nil, err
 		}
+
+        var ok bool
 
 		if account, ok = owner.(*v1alpha1.Account); !ok {
 			acc.Status.MarkAccountResolveFailed(v1alpha1.ReasonInvalidSigningKeyOwner, "user issuer is not owned by an Account, got: %s", owner.GetObjectKind().GroupVersionKind().String())
 
-			return nil, false, nil
+			return nil, TerminalError(fmt.Errorf("user issuer is not owned by an Account"))
 		}
 	default:
 		logger.Info("invalid keypair, expected Account or SigningKey", "key_pair_type", fmt.Sprintf("%T", keyPair))
 
 		acc.Status.MarkAccountResolveFailed(v1alpha1.ReasonUnsupportedIssuer, "invalid keypair, expected Account or SigningKey, got: %s", keyPair.GroupVersionKind().String())
 
-		return nil, false, nil
+		return nil, TerminalError(fmt.Errorf("invalid keypair, expected Account or SigningKey"))
 	}
 
 	acc.Status.MarkAccountResolved(v1alpha1.InferredObjectReference{
@@ -276,21 +255,17 @@ func (r *UserReconciler) resolveAccount(ctx context.Context, acc *v1alpha1.User,
 		Name:      account.Name,
 	})
 
-	return account, true, nil
+	return account, nil
 }
 
-func (r *UserReconciler) reconcileJWTSecret(ctx context.Context, usr *v1alpha1.User, keyPairable v1alpha1.KeyPairable) (string, bool, error) {
+func (r *UserReconciler) reconcileJWTSecret(ctx context.Context, usr *v1alpha1.User, keyPairable v1alpha1.KeyPairable) (string, error) {
 	logger := log.FromContext(ctx)
 
-	issuerKP, ok, err := r.loadIssuerSeed(ctx, keyPairable, nkeys.PrefixByteAccount)
-	if err != nil || !ok {
-		if cerr, ok := asConditionError(err); ok {
-			cerr.MarkCondition(usr.Status.MarkIssuerResolveFailed, usr.Status.MarkIssuerResolveUnknown)
-		} else {
-			usr.Status.MarkIssuerResolveUnknown(v1alpha1.ReasonUnknownError, err.Error())
-		}
+	issuerKP, err := r.loadIssuerSeed(ctx, keyPairable, nkeys.PrefixByteAccount)
+	if err != nil {
+        MarkCondition(err, usr.Status.MarkIssuerResolveFailed, usr.Status.MarkIssuerResolveUnknown)
 
-		return "", ok, err
+		return "", err
 	}
 
 	usr.Status.MarkIssuerResolved()
@@ -302,7 +277,7 @@ func (r *UserReconciler) reconcileJWTSecret(ctx context.Context, usr *v1alpha1.U
 	if err != nil {
 		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-		return "", false, nil
+		return "", TerminalError(err)
 	}
 
 	got, err := r.CoreV1.Secrets(usr.Namespace).Get(ctx, usr.Spec.JWTSecretName, metav1.GetOptions{})
@@ -310,25 +285,25 @@ func (r *UserReconciler) reconcileJWTSecret(ctx context.Context, usr *v1alpha1.U
 		if errors.IsNotFound(err) {
 			logger.Info("JWT secret not found, creating new secret")
 
-			ok, err := r.createJWTSecret(ctx, usr, nextJWT)
-			if err != nil || !ok {
-				return "", ok, err
-			}
+			err := r.createJWTSecret(ctx, usr, nextJWT)
+			if err != nil {
+				return "", err
+            }
 
-			return nextJWT, true, nil
+			return nextJWT, nil
 		}
 
 		logger.Error(err, "failed to get JWT secret")
 
 		usr.Status.MarkJWTSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
 
-		return "", false, err
+		return "", err
 	}
 
 	return r.ensureJWTSecretUpToDate(ctx, usr, wantClaims, got, nextJWT)
 }
 
-func (r *UserReconciler) createJWTSecret(ctx context.Context, usr *v1alpha1.User, userJWT string) (bool, error) {
+func (r *UserReconciler) createJWTSecret(ctx context.Context, usr *v1alpha1.User, userJWT string) error {
 	logger := log.FromContext(ctx)
 
 	secret, err := resources.NewJWTSecretBuilder(r.Scheme).Build(usr, userJWT)
@@ -337,7 +312,7 @@ func (r *UserReconciler) createJWTSecret(ctx context.Context, usr *v1alpha1.User
 
 		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-		return true, err
+		return TerminalError(err)
 	}
 
 	if err := r.Client.Create(ctx, secret); err != nil {
@@ -345,19 +320,18 @@ func (r *UserReconciler) createJWTSecret(ctx context.Context, usr *v1alpha1.User
 
 		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 
-		// we shouldn't expect any errors here, so returning false will communicate up to the controller that this
-		// should be retried.
-		return false, err
+		// we shouldn't expect any errors here, so communicate up to the controller that this should be retried.
+		return TemporaryError(err)
 	}
 
 	r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "JWTSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
 
-	return true, nil
+	return nil
 }
 
 // ensureJWTSecretUpToDate compares that the existing JWT secret decodes and matches the expected claims, if it does not
 // match the secret will be updated with the nextJWT value.
-func (r *UserReconciler) ensureJWTSecretUpToDate(ctx context.Context, usr *v1alpha1.User, wantClaims *jwt.UserClaims, got *v1.Secret, nextJWT string) (string, bool, error) {
+func (r *UserReconciler) ensureJWTSecretUpToDate(ctx context.Context, usr *v1alpha1.User, wantClaims *jwt.UserClaims, got *v1.Secret, nextJWT string) (string, error) {
 	logger := log.FromContext(ctx)
 
 	gotJWT, ok := got.Data[v1alpha1.NatsSecretJWTKey]
@@ -366,7 +340,7 @@ func (r *UserReconciler) ensureJWTSecretUpToDate(ctx context.Context, usr *v1alp
 		//  not we tell the user to delete it manually, and they'll either do so, or update the spec to use a new name.
 		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonInvalidJWTSecret, "JWT secret does not contain JWT data, delete the secret to generate a new JWT")
 
-		return "", false, nil
+		return "", TerminalError(fmt.Errorf("JWT secret does not contain JWT data, delete the secret to generate a new JWT"))
 	}
 
 	gotClaims, err := jwt.Decode(string(gotJWT))
@@ -380,7 +354,7 @@ func (r *UserReconciler) ensureJWTSecretUpToDate(ctx context.Context, usr *v1alp
 
 		usr.Status.MarkJWTSecretReady()
 
-		return string(gotJWT), true, nil
+		return string(gotJWT), nil
 	}
 
 	want, err := resources.NewJWTSecretBuilderFromSecret(got, r.Scheme).Build(usr, nextJWT)
@@ -389,7 +363,7 @@ func (r *UserReconciler) ensureJWTSecretUpToDate(ctx context.Context, usr *v1alp
 
 		usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
 
-		return "", true, err
+		return "", TemporaryError(err)
 	}
 
 	err = r.Client.Update(ctx, want)
@@ -398,14 +372,14 @@ func (r *UserReconciler) ensureJWTSecretUpToDate(ctx context.Context, usr *v1alp
 
 		usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
 
-		return "", false, err
+		return "", TemporaryError(err)
 	}
 
 	r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "SeedSecretUpdated", "updated secret: %s/%s", want.Namespace, want.Name)
 
 	usr.Status.MarkJWTSecretReady()
 
-	return nextJWT, true, nil
+	return nextJWT, nil
 }
 
 func (r *UserReconciler) getCAIfExists(ctx context.Context, acc *v1alpha1.Account) ([]byte, error) {

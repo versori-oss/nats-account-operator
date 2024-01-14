@@ -3,9 +3,8 @@ package controllers
 import (
 	"context"
 	"fmt"
+
 	"github.com/nats-io/nkeys"
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-	"github.com/versori-oss/nats-account-operator/controllers/resources"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -15,6 +14,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/controllers/resources"
 )
 
 type BaseReconciler struct {
@@ -24,24 +26,24 @@ type BaseReconciler struct {
 	EventRecorder record.EventRecorder
 }
 
-func (r *BaseReconciler) ensureSeedSecretUpToDate(ctx context.Context, owner client.Object, got *v1.Secret) (nkeys.KeyPair, bool, error) {
+func (r *BaseReconciler) ensureSeedSecretUpToDate(ctx context.Context, owner client.Object, got *v1.Secret) (nkeys.KeyPair, error) {
 	logger := log.FromContext(ctx)
 
 	seed, ok := got.Data[v1alpha1.NatsSecretSeedKey]
 	if !ok {
-		return nil, true, ConditionFailed(v1alpha1.ReasonInvalidSeedSecret, "seed secret does not contain seed data, delete the secret for a new keypair")
+		return nil, TerminalError(ConditionFailed(v1alpha1.ReasonInvalidSeedSecret, "seed secret does not contain seed data, delete the secret for a new keypair"))
 	}
 
 	kp, err := nkeys.FromSeed(seed)
 	if err != nil {
-		return nil, true, ConditionFailed(v1alpha1.ReasonInvalidSeedSecret, "failed to parse seed: %s", err.Error())
+		return nil, TerminalError(ConditionFailed(v1alpha1.ReasonInvalidSeedSecret, "failed to parse seed: %s", err.Error()))
 	}
 
 	want, err := resources.NewKeyPairSecretBuilderFromSecret(got, r.Scheme).Build(owner, kp)
 	if err != nil {
 		logger.Error(err, "failed to build desired keypair secret")
 
-		return kp, true, ConditionFailed(v1alpha1.ReasonUnknownError, err.Error())
+		return kp, TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, err.Error()))
 	}
 
 	if !equality.Semantic.DeepEqual(got, want) {
@@ -51,23 +53,21 @@ func (r *BaseReconciler) ensureSeedSecretUpToDate(ctx context.Context, owner cli
 		if err != nil {
 			logger.Error(err, "failed to update seed secret")
 
-			return kp, false, ConditionFailed(v1alpha1.ReasonUnknownError, err.Error())
+			return kp, ConditionFailed(v1alpha1.ReasonUnknownError, err.Error())
 		}
 
 		r.EventRecorder.Eventf(owner, v1.EventTypeNormal, "SeedSecretUpdated", "updated secret: %s/%s", want.Namespace, want.Name)
 	}
 
-	return kp, true, nil
+	return kp, nil
 }
 
 // resolveIssuer resolves the issuer reference to a KeyPairable object. This is abstracted to support issuers being
 // either a SigningKey, or an Operator/Account where the object being reconciled is an Account/User respectively.
 //
-// The returned bool indicates whether the process has handled the reconciliation properly. If an error is returned,
-// this should be for informational purposes (or to mark a status condition) and not returned back to the controller
-// runtime. Usually this should only be false in combination with an error if the error is caused by a temporary or
-// unknown issue such as network errors etc.
-func (r *BaseReconciler) resolveIssuer(ctx context.Context, issuer v1alpha1.IssuerReference, fallbackNamespace string) (kp v1alpha1.KeyPairable, ok bool, err error) {
+// The returned bool is true when everything is ok, or if a temporary error has occurred and the
+// reconciliation should be re-enqueued.
+func (r *BaseReconciler) resolveIssuer(ctx context.Context, issuer v1alpha1.IssuerReference, fallbackNamespace string) (kp v1alpha1.KeyPairable, err error) {
 	logger := log.FromContext(ctx)
 
 	issuerGVK := issuer.Ref.GetGroupVersionKind()
@@ -76,8 +76,8 @@ func (r *BaseReconciler) resolveIssuer(ctx context.Context, issuer v1alpha1.Issu
 	if err != nil {
 		logger.Error(err, "failed to create issuer object from scheme", "issuer_gvk", issuerGVK.String())
 
-		return nil, true, ConditionFailed(
-			v1alpha1.ReasonUnsupportedIssuer, "unsupported GroupVersionKind: %s", err.Error())
+		return nil, TerminalError(ConditionFailed(
+			v1alpha1.ReasonUnsupportedIssuer, "unsupported GroupVersionKind: %s", err.Error()))
 	}
 
 	issuerObj, ok := obj.(client.Object)
@@ -87,8 +87,8 @@ func (r *BaseReconciler) resolveIssuer(ctx context.Context, issuer v1alpha1.Issu
 			"obj_type", fmt.Sprintf("%T", obj),
 		)
 
-		return nil, true, ConditionFailed(
-			v1alpha1.ReasonUnsupportedIssuer, "runtime.Object cannot be converted to client.Object", issuerGVK.String())
+		return nil, TerminalError(ConditionFailed(
+			v1alpha1.ReasonUnsupportedIssuer, "runtime.Object cannot be converted to client.Object", issuerGVK.String()))
 	}
 
 	// .issuer.ref.namespace is optional, so default to the Account's namespace if not set
@@ -102,19 +102,19 @@ func (r *BaseReconciler) resolveIssuer(ctx context.Context, issuer v1alpha1.Issu
 	}, issuerObj)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return nil, true, ConditionFailed(
-				v1alpha1.ReasonNotFound, "%s, %s/%s: not found", issuerGVK.String(), fallbackNamespace, issuer.Ref.Name)
+			return nil, TemporaryError(ConditionFailed(
+				v1alpha1.ReasonNotFound, "%s, %s/%s: not found", issuerGVK.String(), fallbackNamespace, issuer.Ref.Name))
 		}
 
-		return nil, false, ConditionUnknown(v1alpha1.ReasonUnknownError, "%s", err.Error())
+		return nil, ConditionUnknown(v1alpha1.ReasonUnknownError, "failed to get issuer object from client: %w", err)
 	}
 
 	keyPairable, ok := issuerObj.(v1alpha1.KeyPairable)
 	if !ok {
 		logger.Info("issuer does not implement KeyPairable interface", "issuer_type", fmt.Sprintf("%T", issuer))
 
-		return nil, true, ConditionFailed(
-			v1alpha1.ReasonUnsupportedIssuer, "issuer does not implement KeyPairable interface")
+		return nil, TerminalError(ConditionFailed(
+			v1alpha1.ReasonUnsupportedIssuer, "issuer does not implement KeyPairable interface"))
 	}
 
 	conditions := keyPairable.GetConditionSet().Manage(keyPairable.GetStatus())
@@ -126,18 +126,18 @@ func (r *BaseReconciler) resolveIssuer(ctx context.Context, issuer v1alpha1.Issu
 	if !seedReadyCondition.IsTrue() {
 		logger.V(1).Info("issuer seed secret is not ready", "issuer_type", fmt.Sprintf("%T", issuer), "reason", seedReadyCondition.Reason, "message", seedReadyCondition.Message)
 
-		return nil, true, ConditionUnknown(
-			v1alpha1.ReasonNotReady, "issuer seed secret is not ready")
+		return nil, TemporaryError(ConditionUnknown(
+			v1alpha1.ReasonNotReady, "issuer seed secret is not ready"))
 	}
 
-	return keyPairable, true, nil
+	return keyPairable, nil
 }
 
-func (r *BaseReconciler) resolveSigningKeyOwner(ctx context.Context, sk *v1alpha1.SigningKey) (client.Object, bool, error) {
+func (r *BaseReconciler) resolveSigningKeyOwner(ctx context.Context, sk *v1alpha1.SigningKey) (client.Object, error) {
 	logger := log.FromContext(ctx)
 
 	if !sk.Status.GetCondition(v1alpha1.SigningKeyConditionOwnerResolved).IsTrue() {
-		return nil, true, ConditionUnknown(v1alpha1.ReasonNotReady, "signing key owner has not been resolved")
+		return nil, TemporaryError(ConditionUnknown(v1alpha1.ReasonNotReady, "signing key owner has not been resolved"))
 	}
 
 	gvk := sk.Status.OwnerRef.GetGroupVersionKind()
@@ -146,8 +146,8 @@ func (r *BaseReconciler) resolveSigningKeyOwner(ctx context.Context, sk *v1alpha
 	if err != nil {
 		logger.Error(err, "failed to create owner object from scheme", "owner_gvk", gvk.String())
 
-		return nil, true, ConditionFailed(
-			v1alpha1.ReasonInvalidSigningKeyOwner, "unsupported GroupVersionKind: %s", err.Error())
+		return nil, TemporaryError(ConditionFailed(
+			v1alpha1.ReasonInvalidSigningKeyOwner, "unsupported GroupVersionKind: %s", err.Error()))
 	}
 
 	owner, ok := obj.(client.Object)
@@ -157,8 +157,8 @@ func (r *BaseReconciler) resolveSigningKeyOwner(ctx context.Context, sk *v1alpha
 			"owner_type", fmt.Sprintf("%T", obj),
 		)
 
-		return nil, true, ConditionFailed(
-			v1alpha1.ReasonInvalidSigningKeyOwner, "runtime.Object cannot be converted to client.Object", gvk.String())
+		return nil, TemporaryError(ConditionFailed(
+			v1alpha1.ReasonInvalidSigningKeyOwner, "runtime.Object cannot be converted to client.Object", gvk.String()))
 	}
 
 	err = r.Client.Get(ctx, client.ObjectKey{
@@ -166,55 +166,59 @@ func (r *BaseReconciler) resolveSigningKeyOwner(ctx context.Context, sk *v1alpha
 		Name:      sk.Status.OwnerRef.Name,
 	}, owner)
 	if err != nil {
-		logger.Error(err, "failed to get signing key owner")
-
 		if errors.IsNotFound(err) {
-			return nil, true, ConditionFailed(v1alpha1.ReasonNotFound, err.Error())
+			return nil, TemporaryError(ConditionFailed(
+				v1alpha1.ReasonNotFound, "%s, %s/%s: not found", gvk.String(), sk.Status.OwnerRef.Namespace, sk.Status.OwnerRef.Name))
 		}
 
-		return nil, false, ConditionUnknown(v1alpha1.ReasonUnknownError, err.Error())
+		return nil, ConditionUnknown(v1alpha1.ReasonUnknownError, "failed to get owner object from client: %w", err)
 	}
 
-	return owner, true, nil
+	return owner, nil
 }
 
-func (r *BaseReconciler) loadIssuerSeed(ctx context.Context, issuer v1alpha1.KeyPairable, wantPrefix nkeys.PrefixByte) (nkeys.KeyPair, bool, error) {
+func (r *BaseReconciler) loadIssuerSeed(ctx context.Context, issuer v1alpha1.KeyPairable, wantPrefix nkeys.PrefixByte) (nkeys.KeyPair, error) {
 	logger := log.FromContext(ctx)
 
 	keyPair := issuer.GetKeyPair()
 	if keyPair == nil {
 		logger.Info("WARNING! issuer KeyPair is nil, but condition checks should have caught this")
 
-		return nil, true, ConditionFailed(v1alpha1.ReasonUnknownError, "issuer KeyPair is nil")
+		return nil, ConditionFailed(v1alpha1.ReasonUnknownError, "issuer KeyPair is nil")
 	}
 
 	skSeedSecret, err := r.CoreV1.Secrets(issuer.GetNamespace()).Get(ctx, keyPair.SeedSecretName, metav1.GetOptions{})
 	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil, TemporaryError(ConditionFailed(
+				v1alpha1.ReasonNotFound, "core/v1; Secret, %s/%s: not found", issuer.GetNamespace(), issuer.GetName()))
+		}
+
 		logger.V(1).Info("failed to get issuer seed", "issuer", issuer.GetName())
 
-		// if err is NotFound, there's no need to requeue since creation of the secret should trigger new
-		// reconciliations
-		return nil, errors.IsNotFound(err), ConditionUnknown(v1alpha1.ReasonIssuerSeedError, "failed to get issuer seed: %s", err.Error())
+		return nil, ConditionUnknown(v1alpha1.ReasonIssuerSeedError, "failed to get issuer seed: %s", err.Error())
 	}
 
 	seed, ok := skSeedSecret.Data[v1alpha1.NatsSecretSeedKey]
 	if !ok {
-		return nil, true, ConditionFailed(v1alpha1.ReasonMalformedSeedSecret, "secret missing required field: %s", v1alpha1.NatsSecretSeedKey)
+		// TODO: this is a terminal error, but if the secret is updated, this will only trigger a
+		//  reconcile on the owning issuer, and not the user.
+		return nil, TerminalError(ConditionFailed(v1alpha1.ReasonMalformedSeedSecret, "secret missing required field: %s", v1alpha1.NatsSecretSeedKey))
 	}
 
 	prefix, _, err := nkeys.DecodeSeed(seed)
 	if err != nil {
-		return nil, true, ConditionFailed(v1alpha1.ReasonMalformedSeedSecret, "failed to parse seed: %s", err.Error())
+		return nil, TerminalError(ConditionFailed(v1alpha1.ReasonMalformedSeedSecret, "failed to parse seed: %s", err.Error()))
 	}
 
 	if prefix != wantPrefix {
-		return nil, true, ConditionFailed(
+		return nil, TerminalError(ConditionFailed(
 			v1alpha1.ReasonMalformedSeedSecret,
 			"unexpected seed prefix, wanted %q but got %q",
 			wantPrefix.String(),
 			prefix.String(),
-		)
-	}
+		))
+    }
 
 	// we've already decoded the seed once to check the prefix, so we can ignore this error
 	kp, _ := nkeys.FromSeed(seed)
@@ -223,19 +227,19 @@ func (r *BaseReconciler) loadIssuerSeed(ctx context.Context, issuer v1alpha1.Key
 	if err != nil {
 		logger.Error(err, "failed to get public key from seed")
 
-		return nil, true, ConditionFailed(v1alpha1.ReasonUnknownError, "failed to get public key from seed: %s", err.Error())
+		return nil, TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to get public key from seed: %s", err.Error()))
 	}
 
 	// check that the public key generated from the secret matches the public key in the issuer's KeyPair status, if
 	// this fails then the issuer is probably going to reconcile again soon, and we'll be enqueued again afterwards.
 	if pk != keyPair.PublicKey {
-		return nil, false, ConditionFailed(
+		return nil, TerminalError(ConditionFailed(
 			v1alpha1.ReasonPublicKeyMismatch,
 			"public key mismatch, wanted %q but got %q",
 			keyPair.PublicKey,
 			pk,
-		)
+		))
 	}
 
-	return kp, true, nil
+	return kp, nil
 }
