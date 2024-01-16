@@ -26,10 +26,10 @@ SOFTWARE.
 package v1alpha1
 
 import (
-    v1 "k8s.io/api/core/v1"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-    "github.com/versori-oss/nats-account-operator/pkg/apis"
+	"github.com/versori-oss/nats-account-operator/pkg/apis"
 )
 
 // TLSConfig is the TLS configuration for communicating to the NATS server for pushing/deleting account JWTs.

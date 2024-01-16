@@ -2,8 +2,10 @@ package nsc
 
 import (
 	"fmt"
+
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
+
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 

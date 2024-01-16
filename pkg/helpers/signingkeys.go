@@ -1,8 +1,9 @@
 package helpers
 
 import (
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 
 // NextSigningKeys compares the current SigningKeys assigned to a resource to a list of SigningKeys which currently

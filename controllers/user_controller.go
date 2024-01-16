@@ -26,24 +26,24 @@ SOFTWARE.
 package controllers
 
 import (
-    "context"
-    "fmt"
+	"context"
+	"fmt"
 
-    "github.com/nats-io/jwt/v2"
-    "github.com/nats-io/nkeys"
-    "go.uber.org/multierr"
-    v1 "k8s.io/api/core/v1"
-    "k8s.io/apimachinery/pkg/api/equality"
-    "k8s.io/apimachinery/pkg/api/errors"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-    "k8s.io/client-go/tools/record"
-    ctrl "sigs.k8s.io/controller-runtime"
-    "sigs.k8s.io/controller-runtime/pkg/log"
+	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nkeys"
+	"go.uber.org/multierr"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
-    "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-    "github.com/versori-oss/nats-account-operator/controllers/resources"
-    accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
-    "github.com/versori-oss/nats-account-operator/pkg/nsc"
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/controllers/resources"
+	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 // UserReconciler reconciles a User object
@@ -89,7 +89,7 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 		}
 	}()
 
-	seed,err := r.reconcileSeedSecret(ctx, usr)
+	seed, err := r.reconcileSeedSecret(ctx, usr)
 	if err != nil {
 		return AsResult(err)
 	}
@@ -99,9 +99,9 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 	// errors and mark the conditions accordingly
 	keyPairable, err := r.resolveIssuer(ctx, usr.Spec.Issuer, usr.Namespace)
 	if err != nil {
-        MarkCondition(err, usr.Status.MarkIssuerResolveFailed, usr.Status.MarkIssuerResolveUnknown)
+		MarkCondition(err, usr.Status.MarkIssuerResolveFailed, usr.Status.MarkIssuerResolveUnknown)
 
-        return AsResult(err)
+		return AsResult(err)
 	}
 
 	acc, err := r.resolveAccount(ctx, usr, keyPairable)
@@ -154,7 +154,7 @@ func (r *UserReconciler) reconcileSeedSecret(ctx context.Context, usr *v1alpha1.
 
 	kp, err := r.ensureSeedSecretUpToDate(ctx, usr, got)
 	if err != nil {
-        MarkCondition(err, usr.Status.MarkSeedSecretFailed, usr.Status.MarkSeedSecretUnknown)
+		MarkCondition(err, usr.Status.MarkSeedSecretFailed, usr.Status.MarkSeedSecretUnknown)
 
 		return nil, err
 	}
@@ -230,12 +230,12 @@ func (r *UserReconciler) resolveAccount(ctx context.Context, acc *v1alpha1.User,
 
 		owner, err := r.resolveSigningKeyOwner(ctx, v)
 		if err != nil {
-            MarkCondition(err, acc.Status.MarkAccountResolveFailed, acc.Status.MarkAccountResolveUnknown)
+			MarkCondition(err, acc.Status.MarkAccountResolveFailed, acc.Status.MarkAccountResolveUnknown)
 
 			return nil, err
 		}
 
-        var ok bool
+		var ok bool
 
 		if account, ok = owner.(*v1alpha1.Account); !ok {
 			acc.Status.MarkAccountResolveFailed(v1alpha1.ReasonInvalidSigningKeyOwner, "user issuer is not owned by an Account, got: %s", owner.GetObjectKind().GroupVersionKind().String())
@@ -263,7 +263,7 @@ func (r *UserReconciler) reconcileJWTSecret(ctx context.Context, usr *v1alpha1.U
 
 	issuerKP, err := r.loadIssuerSeed(ctx, keyPairable, nkeys.PrefixByteAccount)
 	if err != nil {
-        MarkCondition(err, usr.Status.MarkIssuerResolveFailed, usr.Status.MarkIssuerResolveUnknown)
+		MarkCondition(err, usr.Status.MarkIssuerResolveFailed, usr.Status.MarkIssuerResolveUnknown)
 
 		return "", err
 	}
@@ -288,7 +288,7 @@ func (r *UserReconciler) reconcileJWTSecret(ctx context.Context, usr *v1alpha1.U
 			err := r.createJWTSecret(ctx, usr, nextJWT)
 			if err != nil {
 				return "", err
-            }
+			}
 
 			return nextJWT, nil
 		}

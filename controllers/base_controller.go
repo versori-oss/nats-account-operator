@@ -218,7 +218,7 @@ func (r *BaseReconciler) loadIssuerSeed(ctx context.Context, issuer v1alpha1.Key
 			wantPrefix.String(),
 			prefix.String(),
 		))
-    }
+	}
 
 	// we've already decoded the seed once to check the prefix, so we can ignore this error
 	kp, _ := nkeys.FromSeed(seed)

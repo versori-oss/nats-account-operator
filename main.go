@@ -26,30 +26,30 @@ SOFTWARE.
 package main
 
 import (
-    "flag"
-    "os"
+	"flag"
+	"os"
 
-    "go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zapcore"
 
-    "github.com/versori-oss/nats-account-operator/pkg/nsc"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 
-    // Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-    // to ensure that exec-entrypoint and run can make use of them.
+	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
+	// to ensure that exec-entrypoint and run can make use of them.
 
-    "k8s.io/client-go/kubernetes"
-    _ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/kubernetes"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-    "k8s.io/apimachinery/pkg/runtime"
-    utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-    clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-    ctrl "sigs.k8s.io/controller-runtime"
-    "sigs.k8s.io/controller-runtime/pkg/healthz"
-    "sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-    accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-    "github.com/versori-oss/nats-account-operator/controllers"
-    accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned"
-    // +kubebuilder:scaffold:imports
+	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/controllers"
+	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned"
+	// +kubebuilder:scaffold:imports
 )
 
 var (
@@ -76,7 +76,7 @@ func main() {
 	opts := zap.Options{
 		Development:     true,
 		StacktraceLevel: zapcore.FatalLevel,
-        TimeEncoder: zapcore.RFC3339TimeEncoder,
+		TimeEncoder:     zapcore.RFC3339TimeEncoder,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()

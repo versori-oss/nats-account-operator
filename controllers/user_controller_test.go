@@ -6,10 +6,11 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-	"github.com/versori-oss/nats-account-operator/pkg/apis"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/pkg/apis"
 )
 
 // this test is written to demonstrate status equality

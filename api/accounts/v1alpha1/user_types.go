@@ -26,9 +26,9 @@ SOFTWARE.
 package v1alpha1
 
 import (
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-    "github.com/versori-oss/nats-account-operator/pkg/apis"
+	"github.com/versori-oss/nats-account-operator/pkg/apis"
 )
 
 // UserSpec defines the desired state of User

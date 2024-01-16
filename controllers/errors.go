@@ -1,12 +1,12 @@
 package controllers
 
 import (
-    "fmt"
+	"fmt"
 
-    "github.com/go-faster/errors"
-    ctrl "sigs.k8s.io/controller-runtime"
+	"github.com/go-faster/errors"
+	ctrl "sigs.k8s.io/controller-runtime"
 
-    "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 
 type markConditionFunc func(reason, messageFormat string, messageA ...interface{})
@@ -16,25 +16,25 @@ type markConditionFunc func(reason, messageFormat string, messageA ...interface{
 // empty result with the causing error, resulting in the reconciler runtime logging the error and
 // re-enqueuing the reconciliation.
 func AsResult(err error) (ctrl.Result, error) {
-    if err == nil {
-        return ctrl.Result{}, nil
-    }
+	if err == nil {
+		return ctrl.Result{}, nil
+	}
 
-    if rerr, ok := errors.Into[*resultError](err); ok {
-        return rerr.Result(), nil
-    }
+	if rerr, ok := errors.Into[*resultError](err); ok {
+		return rerr.Result(), nil
+	}
 
-    return ctrl.Result{}, err
+	return ctrl.Result{}, err
 }
 
 // MarkCondition uses err to mark the condition of the owning object. If err contains a conditionError,
 // the condition will be marked as either failed or unknown, depending on the state of said conditionError.
 func MarkCondition(err error, failure, unknown markConditionFunc) {
-    if cerr, ok := errors.Into[*conditionError](err); ok {
-        cerr.MarkCondition(failure, unknown)
-    } else {
-        unknown(v1alpha1.ReasonUnknownError, err.Error())
-    }
+	if cerr, ok := errors.Into[*conditionError](err); ok {
+		cerr.MarkCondition(failure, unknown)
+	} else {
+		unknown(v1alpha1.ReasonUnknownError, err.Error())
+	}
 }
 
 type conditionError struct {
@@ -63,7 +63,7 @@ func ConditionUnknown(reason, msgFmt string, args ...any) error {
 }
 
 func (c *conditionError) Error() string {
-    // use Errorf to allow msgFmt to contain %w for wrapping other errors.
+	// use Errorf to allow msgFmt to contain %w for wrapping other errors.
 	return fmt.Errorf(c.msgFmt, c.args...).Error()
 }
 
@@ -77,63 +77,63 @@ func (c *conditionError) MarkCondition(failure, unknown markConditionFunc) {
 
 // Unwrap returns the underlying error.
 func (c *conditionError) Unwrap() error {
-    // use Errorf to allow msgFmt to contain %w for wrapping other errors.
-    return fmt.Errorf(c.msgFmt, c.args...)
+	// use Errorf to allow msgFmt to contain %w for wrapping other errors.
+	return fmt.Errorf(c.msgFmt, c.args...)
 }
 
 // resultError is used to terminate reconciliation and control whether the request should be re-enqueued. This error
 // should only be used after any causing errors have been handled/logged, they will not be reported to the reconciler
 // runtime.
 type resultError struct {
-    result ctrl.Result
-    cause error
+	result ctrl.Result
+	cause  error
 }
 
 // NewResultError is used to terminate reconciliation and control whether the request should be re-enqueued by the
 // result parameter.
 func NewResultError(result ctrl.Result, err error) error {
-    if err == nil {
-        return nil
-    }
+	if err == nil {
+		return nil
+	}
 
-    return &resultError{
-        cause: err,
-        result: result,
-    }
+	return &resultError{
+		cause:  err,
+		result: result,
+	}
 }
 
 // TerminalError is used to terminate reconciliation and will not result in the request being re-enqueued.
 func TerminalError(err error) error {
-    if err == nil {
-        return nil
-    }
+	if err == nil {
+		return nil
+	}
 
-    return &resultError{
-        cause: err,
-    }
+	return &resultError{
+		cause: err,
+	}
 }
 
 // TemporaryError is used to terminate reconciliation and will result in the request being re-enqueued.
 func TemporaryError(err error) error {
-    if err == nil {
-        return nil
-    }
+	if err == nil {
+		return nil
+	}
 
-    return &resultError{
-        cause: err,
-        result: ctrl.Result{Requeue: true},
-    }
+	return &resultError{
+		cause:  err,
+		result: ctrl.Result{Requeue: true},
+	}
 }
 
 func (r *resultError) Error() string {
-    return r.cause.Error()
+	return r.cause.Error()
 }
 
 // Unwrap returns the underlying error.
 func (r *resultError) Unwrap() error {
-    return r.cause
+	return r.cause
 }
 
 func (r *resultError) Result() ctrl.Result {
-    return r.result
+	return r.result
 }

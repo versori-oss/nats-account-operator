@@ -2,6 +2,7 @@ package nsc
 
 import (
 	"github.com/nats-io/jwt/v2"
+
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
-	"github.com/versori-oss/nats-account-operator/pkg/nsc/internal"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/versori-oss/nats-account-operator/pkg/nsc/internal"
 )
 
 const (
