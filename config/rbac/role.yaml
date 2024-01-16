@@ -5,10 +5,6 @@ metadata:
   creationTimestamp: null
   name: manager-role
 rules:
-- resources:
-  - events
-  verbs:
-  - create
 - apiGroups:
   - accounts.nats.io
   resources:
@@ -113,6 +109,12 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
 - apiGroups:
   - ""
   resources:
