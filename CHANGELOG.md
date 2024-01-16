@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/versori-oss/nats-account-operator/compare/v0.2.4...v0.2.5) (2024-01-16)
+
+
+### Bug Fixes
+
+* **rbac:** add missing group from manager-role ([d4163e8](https://github.com/versori-oss/nats-account-operator/commit/d4163e8b35aff9cdc49594830c75689851a8cdf8))
+
 ## [0.2.4](https://github.com/versori-oss/nats-account-operator/compare/v0.2.3...v0.2.4) (2024-01-16)
 
 
