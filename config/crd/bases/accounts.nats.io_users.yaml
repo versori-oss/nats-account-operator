@@ -12,6 +12,9 @@ spec:
     kind: User
     listKind: UserList
     plural: users
+    shortNames:
+    - nuser
+    - natsuser
     singular: user
   scope: Namespaced
   versions:

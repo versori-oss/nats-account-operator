@@ -3,10 +3,12 @@ package nsc
 import (
 	"context"
 	"fmt"
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-	clientsetv1alpha1 "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
+
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientsetv1 "k8s.io/client-go/kubernetes/typed/core/v1"
+
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	clientsetv1alpha1 "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 )
 
 type SystemAccountLoader struct {

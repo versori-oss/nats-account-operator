@@ -32,11 +32,6 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
-	"github.com/versori-oss/nats-account-operator/controllers/resources"
-	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
-	"github.com/versori-oss/nats-account-operator/pkg/helpers"
-	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -51,6 +46,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/controllers/resources"
+	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/pkg/helpers"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 const AccountFinalizer = "accounts.nats.io/finalizer"
@@ -62,9 +63,9 @@ type AccountReconciler struct {
 	SysAccountLoader *nsc.SystemAccountLoader
 }
 
-//+kubebuilder:rbac:groups=accounts.nats.io,resources=accounts,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=accounts.nats.io,resources=accounts/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=accounts.nats.io,resources=accounts/finalizers,verbs=update
+// +kubebuilder:rbac:groups=accounts.nats.io,resources=accounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=accounts.nats.io,resources=accounts/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=accounts.nats.io,resources=accounts/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -130,24 +131,16 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	}
 
 	// get the KeyPairable which will be used to sign the Account JWT
-	keyPairable, ok, err := r.resolveIssuer(ctx, acc.Spec.Issuer, acc.Namespace)
-	if err != nil || !ok {
-		if cerr, ok := asConditionError(err); ok {
-			cerr.MarkCondition(acc.Status.MarkIssuerResolveFailed, acc.Status.MarkIssuerResolveUnknown)
-		} else {
-			acc.Status.MarkIssuerResolveUnknown(v1alpha1.ReasonUnknownError, err.Error())
-		}
+	keyPairable, err := r.resolveIssuer(ctx, acc.Spec.Issuer, acc.Namespace)
+	if err != nil {
+		MarkCondition(err, acc.Status.MarkIssuerResolveFailed, acc.Status.MarkIssuerResolveUnknown)
 
-		if ok {
-			return ctrl.Result{}, nil
-		}
-
-		return ctrl.Result{}, err
+		return AsResult(err)
 	}
 
-	operator, ok, err := r.resolveOperator(ctx, acc, keyPairable)
-	if err != nil || !ok {
-		return ctrl.Result{}, err
+	operator, err := r.resolveOperator(ctx, acc, keyPairable)
+	if err != nil {
+		return AsResult(err)
 	}
 
 	// make sure signing keys for this Account are up-to-date before we try to sign the JWT
@@ -187,7 +180,7 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 // resolveOperator handles the v1alpha1.AccountConditionOperatorResolved condition and updating the
 // .status.operatorRef field. If the provided keyPair is a SigningKey this will correctly resolve the owner to an
 // Operator.
-func (r *AccountReconciler) resolveOperator(ctx context.Context, acc *v1alpha1.Account, keyPair v1alpha1.KeyPairable) (operator *v1alpha1.Operator, ok bool, err error) {
+func (r *AccountReconciler) resolveOperator(ctx context.Context, acc *v1alpha1.Account, keyPair v1alpha1.KeyPairable) (operator *v1alpha1.Operator, err error) {
 	logger := log.FromContext(ctx)
 
 	switch v := keyPair.(type) {
@@ -198,32 +191,26 @@ func (r *AccountReconciler) resolveOperator(ctx context.Context, acc *v1alpha1.A
 	case *v1alpha1.SigningKey:
 		logger.V(1).Info("account issuer is a signing key, resolving operator")
 
-		owner, ok, err := r.resolveSigningKeyOwner(ctx, v)
-		if err != nil || !ok {
-			if cerr, ok := asConditionError(err); ok {
-				cerr.MarkCondition(acc.Status.MarkOperatorResolveFailed, acc.Status.MarkOperatorResolveUnknown)
-			} else {
-				acc.Status.MarkOperatorResolveUnknown(v1alpha1.ReasonUnknownError, err.Error())
-			}
+		owner, err := r.resolveSigningKeyOwner(ctx, v)
+		if err != nil {
+			MarkCondition(err, acc.Status.MarkOperatorResolveFailed, acc.Status.MarkOperatorResolveUnknown)
 
-			if ok {
-				return nil, true, nil
-			}
-
-			return nil, false, err
+			return nil, err
 		}
+
+		var ok bool
 
 		if operator, ok = owner.(*v1alpha1.Operator); !ok {
 			acc.Status.MarkOperatorResolveFailed(v1alpha1.ReasonInvalidSigningKeyOwner, "account issuer is not owned by an Operator, got: %s", owner.GetObjectKind().GroupVersionKind().String())
 
-			return nil, false, nil
+			return nil, TerminalError(fmt.Errorf("account issuer is not owned by an Operator"))
 		}
 	default:
 		logger.Info("invalid keypair, expected Operator or SigningKey", "key_pair_type", fmt.Sprintf("%T", keyPair))
 
 		acc.Status.MarkOperatorResolveFailed(v1alpha1.ReasonUnsupportedIssuer, "invalid keypair, expected Operator or SigningKey, got: %s", keyPair.GroupVersionKind().String())
 
-		return nil, false, nil
+		return nil, TerminalError(fmt.Errorf("invalid keypair, expected Operator or SigningKey"))
 	}
 
 	acc.Status.MarkOperatorResolved(v1alpha1.InferredObjectReference{
@@ -231,7 +218,7 @@ func (r *AccountReconciler) resolveOperator(ctx context.Context, acc *v1alpha1.A
 		Name:      operator.Name,
 	})
 
-	return operator, true, nil
+	return operator, nil
 }
 
 func (r *AccountReconciler) resolveSigningKeyOperator(ctx context.Context, acc *v1alpha1.Account, sk *v1alpha1.SigningKey) (*v1alpha1.Operator, bool, error) {

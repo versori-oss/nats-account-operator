@@ -29,8 +29,9 @@ import (
 	"flag"
 	"os"
 
-	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -48,7 +49,7 @@ import (
 	accountsnatsiov1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/controllers"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned"
-	//+kubebuilder:scaffold:imports
+	// +kubebuilder:scaffold:imports
 )
 
 var (
@@ -75,6 +76,7 @@ func main() {
 	opts := zap.Options{
 		Development:     true,
 		StacktraceLevel: zapcore.FatalLevel,
+		TimeEncoder:     zapcore.RFC3339TimeEncoder,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()

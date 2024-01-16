@@ -2,11 +2,13 @@ package resources
 
 import (
 	"fmt"
+
 	"github.com/nats-io/nkeys"
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 
 type KeyPairSecretBuilder struct {

@@ -65,6 +65,7 @@ type SigningKeyStatus struct {
 
 //+genclient
 //+kubebuilder:object:root=true
+//+kubebuilder:resource:shortName=nsk;natssigningkey
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="Public Key",type=string,JSONPath=`.status.keyPair.publicKey`
 //+kubebuilder:printcolumn:name="Owner Kind",type=string,JSONPath=`.status.ownerRef.kind`

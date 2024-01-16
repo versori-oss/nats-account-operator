@@ -26,9 +26,10 @@ SOFTWARE.
 package v1alpha1
 
 import (
-	"github.com/versori-oss/nats-account-operator/pkg/apis"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/versori-oss/nats-account-operator/pkg/apis"
 )
 
 // TLSConfig is the TLS configuration for communicating to the NATS server for pushing/deleting account JWTs.
@@ -103,6 +104,7 @@ func (os *OperatorStatus) SetConditions(conditions apis.Conditions) {
 
 //+genclient
 //+kubebuilder:object:root=true
+//+kubebuilder:resource:shortName=nop;natsoperator
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="Public Key",type=string,JSONPath=`.status.keyPair.publicKey`
 //+kubebuilder:printcolumn:name="System Account",type=string,JSONPath=`.status.resolvedSystemAccount.name`

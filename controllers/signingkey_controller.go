@@ -45,6 +45,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/nats-io/nkeys"
+
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 )

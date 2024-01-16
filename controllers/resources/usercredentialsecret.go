@@ -3,10 +3,11 @@ package resources
 import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
-	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 
 type UserCredentialSecretBuilder struct {
