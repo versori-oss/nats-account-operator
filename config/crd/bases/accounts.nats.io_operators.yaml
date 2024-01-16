@@ -12,6 +12,9 @@ spec:
     kind: Operator
     listKind: OperatorList
     plural: operators
+    shortNames:
+    - nop
+    - natsoperator
     singular: operator
   scope: Namespaced
   versions:

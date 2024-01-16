@@ -12,6 +12,9 @@ spec:
     kind: Account
     listKind: AccountList
     plural: accounts
+    shortNames:
+    - nacc
+    - natsaccount
     singular: account
   scope: Namespaced
   versions:

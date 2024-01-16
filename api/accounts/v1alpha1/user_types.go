@@ -26,8 +26,9 @@ SOFTWARE.
 package v1alpha1
 
 import (
-	"github.com/versori-oss/nats-account-operator/pkg/apis"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+    "github.com/versori-oss/nats-account-operator/pkg/apis"
 )
 
 // UserSpec defines the desired state of User
@@ -110,6 +111,7 @@ func (s *UserStatus) SetConditions(conditions apis.Conditions) {
 
 //+genclient
 //+kubebuilder:object:root=true
+//+kubebuilder:resource:shortName=nuser;natsuser
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="Public Key",type=string,JSONPath=`.status.keyPair.publicKey`
 //+kubebuilder:printcolumn:name="Account",type=string,JSONPath=`.status.accountRef.name`

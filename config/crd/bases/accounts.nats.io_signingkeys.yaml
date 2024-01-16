@@ -12,6 +12,9 @@ spec:
     kind: SigningKey
     listKind: SigningKeyList
     plural: signingkeys
+    shortNames:
+    - nsk
+    - natssigningkey
     singular: signingkey
   scope: Namespaced
   versions:

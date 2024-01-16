@@ -155,6 +155,7 @@ type OperatorRef struct {
 
 //+genclient
 //+kubebuilder:object:root=true
+//+kubebuilder:resource:shortName=nacc;natsaccount
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="Public Key",type=string,JSONPath=`.status.keyPair.publicKey`
 //+kubebuilder:printcolumn:name="Operator",type=string,JSONPath=`.status.operatorRef.name`
