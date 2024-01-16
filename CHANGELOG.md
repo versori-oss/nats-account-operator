@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.4](https://github.com/versori-oss/nats-account-operator/compare/v0.2.3...v0.2.4) (2024-01-16)
+
+
+### Bug Fixes
+
+* allow operator to create events in all namespaces and add shortNames for ease of use in k9s ([aa2cac0](https://github.com/versori-oss/nats-account-operator/commit/aa2cac062c31e7ea38c18e626404811dce8cb41e))
+* handle difference between temporary and terminal errors ([20814a7](https://github.com/versori-oss/nats-account-operator/commit/20814a7ba93951793354efb37fc0b6a5279cacb1))
+
 ## [0.2.3](https://github.com/versori-oss/nats-account-operator/compare/v0.2.2...v0.2.3) (2023-11-07)
 
 
