@@ -1,6 +1,6 @@
 module github.com/versori-oss/nats-account-operator
 
-go 1.20
+go 1.22
 
 require (
 	github.com/go-faster/errors v0.7.1
