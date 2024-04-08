@@ -113,7 +113,7 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 
 	logger.V(1).Info("reconciling user JWT secret")
 
-	ujwt, err := r.reconcileJWTSecret(ctx, usr, keyPairable)
+	ujwt, err := r.reconcileJWTSecret(ctx, usr, acc, keyPairable)
 	if err != nil {
 		logger.Error(err, "failed to reconcile user jwt secret")
 
@@ -242,6 +242,20 @@ func (r *UserReconciler) resolveAccount(ctx context.Context, acc *v1alpha1.User,
 
 			return nil, TerminalError(fmt.Errorf("user issuer is not owned by an Account"))
 		}
+
+		// ensure that account is "Ready", since we're going to assume public key etc., is defined.
+		conditions := account.GetConditionSet().Manage(account.GetStatus())
+
+		// Initialize the conditions if they are not already set, not doing this causes a nil-pointer dereference panic
+		conditions.InitializeConditions()
+
+		accountReadyCondition := conditions.GetCondition(v1alpha1.AccountConditionReady)
+		if !accountReadyCondition.IsTrue() {
+			logger.V(1).Info("signing key owner is not ready", "reason", accountReadyCondition.Reason, "message", accountReadyCondition.Message)
+
+			return nil, TemporaryError(ConditionUnknown(
+				v1alpha1.ReasonNotReady, "signing key owner is not ready"))
+		}
 	default:
 		logger.Info("invalid keypair, expected Account or SigningKey", "key_pair_type", fmt.Sprintf("%T", keyPair))
 
@@ -258,7 +272,7 @@ func (r *UserReconciler) resolveAccount(ctx context.Context, acc *v1alpha1.User,
 	return account, nil
 }
 
-func (r *UserReconciler) reconcileJWTSecret(ctx context.Context, usr *v1alpha1.User, keyPairable v1alpha1.KeyPairable) (string, error) {
+func (r *UserReconciler) reconcileJWTSecret(ctx context.Context, usr *v1alpha1.User, account *v1alpha1.Account, keyPairable v1alpha1.KeyPairable) (string, error) {
 	logger := log.FromContext(ctx)
 
 	issuerKP, err := r.loadIssuerSeed(ctx, keyPairable, nkeys.PrefixByteAccount)
@@ -273,7 +287,7 @@ func (r *UserReconciler) reconcileJWTSecret(ctx context.Context, usr *v1alpha1.U
 	// we want to check that any existing secret decodes to match wantClaims, if it doesn't then we will use nextJWT
 	// to create/update the secret. We cannot just compare the JWTs from the secret and accountJWT because the JWTs are
 	// timestamped with the `iat` claim so will never match.
-	wantClaims, nextJWT, err := nsc.CreateUserClaims(usr, issuerKP)
+	wantClaims, nextJWT, err := nsc.CreateUserClaims(usr, account, issuerKP)
 	if err != nil {
 		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
 

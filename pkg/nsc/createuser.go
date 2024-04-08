@@ -9,7 +9,7 @@ import (
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 
-func CreateUserClaims(resource *v1alpha1.User, signingKey nkeys.KeyPair) (claims *jwt.UserClaims, ujwt string, err error) {
+func CreateUserClaims(resource *v1alpha1.User, account *v1alpha1.Account, signingKey nkeys.KeyPair) (claims *jwt.UserClaims, ujwt string, err error) {
 	claims = jwt.NewUserClaims(resource.Status.KeyPair.PublicKey)
 	claims.Name = resource.Name
 
@@ -52,6 +52,18 @@ func CreateUserClaims(resource *v1alpha1.User, signingKey nkeys.KeyPair) (claims
 				Expires: spec.Permissions.Resp.TTL.Duration,
 			}
 		}
+	}
+
+	skPub, err := signingKey.PublicKey()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get public key from key pair: %w", err)
+	}
+
+	// if the issuer is a signing key and not a direct account, we must set the issuer_account
+	// field to the public key of the account that owns the signing key.
+	accountKP := account.Status.KeyPair
+	if accountKP != nil && accountKP.PublicKey != skPub {
+		claims.IssuerAccount = accountKP.PublicKey
 	}
 
 	ujwt, err = claims.Encode(signingKey)
