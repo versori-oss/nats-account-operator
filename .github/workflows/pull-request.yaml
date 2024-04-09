@@ -24,8 +24,6 @@ jobs:
     needs:
       - test
     runs-on: ubuntu-latest
-    env:
-      KO_DOCKER_REPO: europe-docker.pkg.dev/versori/oss-contrib
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
