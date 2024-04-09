@@ -8,7 +8,7 @@ permissions:
   contents: read
   id-token: write
 env:
-  KO_DOCKER_REPO: europe-docker.pkg.dev/versori/oss-contrib
+  KO_DOCKER_REPO: europe-docker.pkg.dev/versori/oss-contrib/github.com/versori-oss/nats-account-operator
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -49,4 +49,4 @@ jobs:
           # metadata-action outputs the image name with the tags, so strip out the parts before ":" and join back
           # to a csv
           tags=$(echo -n $STEPS_META_OUTPUTS_JSON | jq -r '[ .tags[] | split(":") | .[1] ] | join(",")')
-          ko publish -P -t "${tags}" --platform linux/amd64,linux/arm64 ./
+          ko publish --bare -t "${tags}" --platform linux/amd64,linux/arm64 ./cmd
