@@ -9,7 +9,11 @@ import (
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 )
 
-func CreateUserClaims(resource *v1alpha1.User, account *v1alpha1.Account, signingKey nkeys.KeyPair) (claims *jwt.UserClaims, ujwt string, err error) {
+func CreateUserClaims(
+	resource *v1alpha1.User,
+	account *v1alpha1.Account,
+	signingKey nkeys.KeyPair,
+) (claims *jwt.UserClaims, ujwt string, err error) {
 	claims = jwt.NewUserClaims(resource.Status.KeyPair.PublicKey)
 	claims.Name = resource.Name
 

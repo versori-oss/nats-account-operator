@@ -33,7 +33,8 @@ func (s *SystemAccountLoader) Load(ctx context.Context, operator *v1alpha1.Opera
 		return nil, fmt.Errorf("operator %s/%s does not have a resolved system account", operator.Namespace, operator.Name)
 	}
 
-	account, err := s.accounts.Accounts(operator.Namespace).Get(ctx, operator.Status.ResolvedSystemAccount.Name, v1.GetOptions{})
+	account, err := s.accounts.Accounts(operator.Namespace).
+		Get(ctx, operator.Status.ResolvedSystemAccount.Name, v1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +50,11 @@ func (s *SystemAccountLoader) Load(ctx context.Context, operator *v1alpha1.Opera
 
 	seedBytes, ok := seedSecret.Data[v1alpha1.NatsSecretSeedKey]
 	if !ok {
-		return nil, fmt.Errorf("secret %s/%s is invalid, missing field: %s", seedSecret.Namespace, seedSecret.Name, v1alpha1.NatsSecretSeedKey)
+		return nil, fmt.Errorf(
+			"secret %s/%s is invalid, missing field: %s",
+			seedSecret.Namespace,
+			seedSecret.Name,
+			v1alpha1.NatsSecretSeedKey)
 	}
 
 	return seedBytes, nil

@@ -3,8 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.11.1
-  creationTimestamp: null
+    controller-gen.kubebuilder.io/version: v0.14.0
   name: operators.accounts.nats.io
 spec:
   group: accounts.nats.io
@@ -34,14 +33,19 @@ spec:
         description: Operator is the Schema for the operators API
         properties:
           apiVersion:
-            description: 'APIVersion defines the versioned schema of this representation
-              of an object. Servers should convert recognized schemas to the latest
-              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
-            description: 'Kind is a string value representing the REST resource this
-              object represents. Servers may infer this from the endpoint the client
-              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
@@ -52,33 +56,33 @@ spec:
                 description: AccountServerURL is a JWT claim for the Operator
                 type: string
               accountsNamespaceSelector:
-                description: AccountsNamespaceSelector defines which namespaces are
-                  allowed to contain Accounts managed by this Operator. By default,
-                  the Operator will manage Accounts in the same namespace as the Operator,
-                  it can be set to an empty selector `{}` to allow all namespaces.
+                description: |-
+                  AccountsNamespaceSelector defines which namespaces are allowed to contain Accounts managed by this Operator. By
+                  default, the Operator will manage Accounts in the same namespace as the Operator, it can be set to an empty
+                  selector `{}` to allow all namespaces.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
                       The requirements are ANDed.
                     items:
-                      description: A label selector requirement is a selector that
-                        contains values, a key, and an operator that relates the key
-                        and values.
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
                       properties:
                         key:
                           description: key is the label key that the selector applies
                             to.
                           type: string
                         operator:
-                          description: operator represents a key's relationship to
-                            a set of values. Valid operators are In, NotIn, Exists
-                            and DoesNotExist.
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
                           type: string
                         values:
-                          description: values is an array of string values. If the
-                            operator is In or NotIn, the values array must be non-empty.
-                            If the operator is Exists or DoesNotExist, the values
-                            array must be empty. This array is replaced during a strategic
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
                             merge patch.
                           items:
                             type: string
@@ -91,42 +95,41 @@ spec:
                   matchLabels:
                     additionalProperties:
                       type: string
-                    description: matchLabels is a map of {key,value} pairs. A single
-                      {key,value} in the matchLabels map is equivalent to an element
-                      of matchExpressions, whose key field is "key", the operator
-                      is "In", and the values array contains only "value". The requirements
-                      are ANDed.
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
               accountsSelector:
-                description: AccountsSelector allows the Operator to restrict the
-                  Accounts it manages to those matching the selector. The default
-                  (`null`) and `{}` selectors are equivalent and match all Accounts.
-                  This is used in combination to the AccountsNamespaceSelector.
+                description: |-
+                  AccountsSelector allows the Operator to restrict the Accounts it manages to those matching the selector. The
+                  default (`null`) and `{}` selectors are equivalent and match all Accounts. This is used in combination to the
+                  AccountsNamespaceSelector.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
                       The requirements are ANDed.
                     items:
-                      description: A label selector requirement is a selector that
-                        contains values, a key, and an operator that relates the key
-                        and values.
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
                       properties:
                         key:
                           description: key is the label key that the selector applies
                             to.
                           type: string
                         operator:
-                          description: operator represents a key's relationship to
-                            a set of values. Valid operators are In, NotIn, Exists
-                            and DoesNotExist.
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
                           type: string
                         values:
-                          description: values is an array of string values. If the
-                            operator is In or NotIn, the values array must be non-empty.
-                            If the operator is Exists or DoesNotExist, the values
-                            array must be empty. This array is replaced during a strategic
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
                             merge patch.
                           items:
                             type: string
@@ -139,11 +142,10 @@ spec:
                   matchLabels:
                     additionalProperties:
                       type: string
-                    description: matchLabels is a map of {key,value} pairs. A single
-                      {key,value} in the matchLabels map is equivalent to an element
-                      of matchExpressions, whose key field is "key", the operator
-                      is "In", and the values array contains only "value". The requirements
-                      are ANDed.
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
@@ -161,33 +163,33 @@ spec:
                   seed for this Operator.
                 type: string
               signingKeysSelector:
-                description: SigningKeysSelector allows the Operator to restrict the
-                  SigningKeys it manages to those matching the selector. Only SigningKeys
-                  in the same namespace as the Operator are considered. The default
-                  (`null`) and `{}` selectors are equivalent and match all SigningKeys.
+                description: |-
+                  SigningKeysSelector allows the Operator to restrict the SigningKeys it manages to those matching the selector.
+                  Only SigningKeys in the same namespace as the Operator are considered. The default (`null`) and `{}` selectors
+                  are equivalent and match all SigningKeys.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
                       The requirements are ANDed.
                     items:
-                      description: A label selector requirement is a selector that
-                        contains values, a key, and an operator that relates the key
-                        and values.
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
                       properties:
                         key:
                           description: key is the label key that the selector applies
                             to.
                           type: string
                         operator:
-                          description: operator represents a key's relationship to
-                            a set of values. Valid operators are In, NotIn, Exists
-                            and DoesNotExist.
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
                           type: string
                         values:
-                          description: values is an array of string values. If the
-                            operator is In or NotIn, the values array must be non-empty.
-                            If the operator is Exists or DoesNotExist, the values
-                            array must be empty. This array is replaced during a strategic
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
                             merge patch.
                           items:
                             type: string
@@ -200,23 +202,23 @@ spec:
                   matchLabels:
                     additionalProperties:
                       type: string
-                    description: matchLabels is a map of {key,value} pairs. A single
-                      {key,value} in the matchLabels map is equivalent to an element
-                      of matchExpressions, whose key field is "key", the operator
-                      is "In", and the values array contains only "value". The requirements
-                      are ANDed.
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
               systemAccountRef:
-                description: SystemAccountRef is a reference to the Account that this
-                  Operator will use as it's system account. It must exist in the same
-                  namespace as the Operator, the AccountsNamespaceSelector and AccountsSelector
-                  are ignored.
+                description: |-
+                  SystemAccountRef is a reference to the Account that this Operator will use as it's system account. It must exist
+                  in the same namespace as the Operator, the AccountsNamespaceSelector and AccountsSelector are ignored.
                 properties:
                   name:
-                    description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                      TODO: Add other useful fields. apiVersion, kind, uid?'
+                    description: |-
+                      Name of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      TODO: Add other useful fields. apiVersion, kind, uid?
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
@@ -233,8 +235,10 @@ spec:
                           a valid secret key.
                         type: string
                       name:
-                        description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                          TODO: Add other useful fields. apiVersion, kind, uid?'
+                        description: |-
+                          Name of the referent.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          TODO: Add other useful fields. apiVersion, kind, uid?
                         type: string
                       optional:
                         description: Specify whether the Secret or its key must be
@@ -257,13 +261,14 @@ spec:
                 description: Conditions the latest available observations of a resource's
                   current state.
                 items:
-                  description: 'Condition defines a readiness condition for a Knative
-                    resource. See: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties'
+                  description: |-
+                    Condition defines a readiness condition for a Knative resource.
+                    See: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
                   properties:
                     lastTransitionTime:
-                      description: LastTransitionTime is the last time the condition
-                        transitioned from one status to another. We use VolatileTime
-                        in place of metav1.Time to exclude this from creating equality.Semantic
+                      description: |-
+                        LastTransitionTime is the last time the condition transitioned from one status to another.
+                        We use VolatileTime in place of metav1.Time to exclude this from creating equality.Semantic
                         differences (all other things held constant).
                       type: string
                     message:
@@ -274,8 +279,9 @@ spec:
                       description: The reason for the condition's last transition.
                       type: string
                     severity:
-                      description: Severity with which to treat failures of this type
-                        of condition. When this is not specified, it defaults to Error.
+                      description: |-
+                        Severity with which to treat failures of this type of condition.
+                        When this is not specified, it defaults to Error.
                       type: string
                     status:
                       description: Status of the condition, one of True, False, Unknown.
@@ -289,8 +295,9 @@ spec:
                   type: object
                 type: array
               keyPair:
-                description: KeyPair is the public/private key pair for the Operator.
-                  This is created by the controller when an Operator is created.
+                description: |-
+                  KeyPair is the public/private key pair for the Operator. This is created by the controller when an Operator is
+                  created.
                 properties:
                   publicKey:
                     type: string
@@ -301,10 +308,9 @@ spec:
                 - seedSecretName
                 type: object
               resolvedSystemAccount:
-                description: ResolvedSystemAccount is the Account that this Operator
-                  will use as it's system account. This is the same as the resource
-                  defined in OperatorSpec.SystemAccountRef, but validated that the
-                  resource exists.
+                description: |-
+                  ResolvedSystemAccount is the Account that this Operator will use as it's system account. This is the same as the
+                  resource defined in OperatorSpec.SystemAccountRef, but validated that the resource exists.
                 properties:
                   name:
                     type: string
@@ -314,9 +320,9 @@ spec:
                 - name
                 type: object
               signingKeys:
-                description: SigningKeys is the list of additional SigningKey resources
-                  which are owned by this Operator. Accounts may be created using
-                  the default KeyPair or any of these SigningKeys.
+                description: |-
+                  SigningKeys is the list of additional SigningKey resources which are owned by this Operator. Accounts may be
+                  created using the default KeyPair or any of these SigningKeys.
                 items:
                   properties:
                     keyPair:

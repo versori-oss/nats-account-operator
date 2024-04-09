@@ -3,8 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.11.1
-  creationTimestamp: null
+    controller-gen.kubebuilder.io/version: v0.14.0
   name: signingkeys.accounts.nats.io
 spec:
   group: accounts.nats.io
@@ -37,14 +36,19 @@ spec:
         description: SigningKey is the Schema for the signingkeys API
         properties:
           apiVersion:
-            description: 'APIVersion defines the versioned schema of this representation
-              of an object. Servers should convert recognized schemas to the latest
-              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
-            description: 'Kind is a string value representing the REST resource this
-              object represents. Servers may infer this from the endpoint the client
-              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
@@ -52,10 +56,10 @@ spec:
             description: SigningKeySpec defines the desired state of SigningKey
             properties:
               ownerRef:
-                description: OwnerRef references the owning object for this signing
-                  key. This should be one of Operator or Account. The controller will
-                  validate that this SigningKey is allowed to be owned by the referenced
-                  resource by evaluating its label selectors.
+                description: |-
+                  OwnerRef references the owning object for this signing key. This should be one of Operator or Account. The
+                  controller will validate that this SigningKey is allowed to be owned by the referenced resource by evaluating its
+                  label selectors.
                 properties:
                   apiVersion:
                     type: string
@@ -88,13 +92,14 @@ spec:
                 description: Conditions the latest available observations of a resource's
                   current state.
                 items:
-                  description: 'Condition defines a readiness condition for a Knative
-                    resource. See: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties'
+                  description: |-
+                    Condition defines a readiness condition for a Knative resource.
+                    See: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
                   properties:
                     lastTransitionTime:
-                      description: LastTransitionTime is the last time the condition
-                        transitioned from one status to another. We use VolatileTime
-                        in place of metav1.Time to exclude this from creating equality.Semantic
+                      description: |-
+                        LastTransitionTime is the last time the condition transitioned from one status to another.
+                        We use VolatileTime in place of metav1.Time to exclude this from creating equality.Semantic
                         differences (all other things held constant).
                       type: string
                     message:
@@ -105,8 +110,9 @@ spec:
                       description: The reason for the condition's last transition.
                       type: string
                     severity:
-                      description: Severity with which to treat failures of this type
-                        of condition. When this is not specified, it defaults to Error.
+                      description: |-
+                        Severity with which to treat failures of this type of condition.
+                        When this is not specified, it defaults to Error.
                       type: string
                     status:
                       description: Status of the condition, one of True, False, Unknown.
@@ -144,10 +150,10 @@ spec:
                   namespace:
                     type: string
                   uid:
-                    description: UID is a type that holds unique ID values, including
-                      UUIDs.  Because we don't ONLY use UUIDs, this is an alias to
-                      string.  Being a type captures intent and helps make sure that
-                      UIDs and names do not get conflated.
+                    description: |-
+                      UID is a type that holds unique ID values, including UUIDs.  Because we
+                      don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                      intent and helps make sure that UIDs and names do not get conflated.
                     type: string
                 required:
                 - apiVersion

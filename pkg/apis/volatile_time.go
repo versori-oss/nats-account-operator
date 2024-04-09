@@ -45,7 +45,7 @@ func (t *VolatileTime) UnmarshalJSON(b []byte) error {
 }
 
 func init() {
-	equality.Semantic.AddFunc(
+	_ = equality.Semantic.AddFunc(
 		// Always treat VolatileTime fields as equivalent.
 		func(VolatileTime, VolatileTime) bool {
 			return true
