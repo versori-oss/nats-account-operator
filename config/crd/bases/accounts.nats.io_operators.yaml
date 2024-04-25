@@ -316,8 +316,11 @@ spec:
                     type: string
                   namespace:
                     type: string
+                  publicKey:
+                    type: string
                 required:
                 - name
+                - publicKey
                 type: object
               signingKeys:
                 description: |-

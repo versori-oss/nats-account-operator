@@ -27,11 +27,17 @@ func NewKeyPairSecretBuilder(scheme *runtime.Scheme) *KeyPairSecretBuilder {
 func NewKeyPairSecretBuilderFromSecret(s *v1.Secret, scheme *runtime.Scheme) *KeyPairSecretBuilder {
 	return &KeyPairSecretBuilder{
 		scheme: scheme,
-		secret: s,
+		secret: s.DeepCopy(),
 	}
 }
 
-func (b *KeyPairSecretBuilder) Build(obj client.Object, kp nkeys.KeyPair) (*v1.Secret, error) {
+func (b *KeyPairSecretBuilder) Build(obj client.Object, kp nkeys.KeyPair, opts ...SecretOption) (*v1.Secret, error) {
+	for _, opt := range opts {
+		if err := opt(b.secret); err != nil {
+			return nil, fmt.Errorf("failed to apply option: %w", err)
+		}
+	}
+
 	seed, err := kp.Seed()
 	if err != nil {
 		return nil, err

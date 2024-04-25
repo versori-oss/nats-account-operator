@@ -29,7 +29,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
@@ -117,10 +116,12 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 
 	ujwt, err := r.reconcileJWTSecret(ctx, usr, acc, keyPairable)
 	if err != nil {
-		logger.Error(err, "failed to reconcile user jwt secret")
+		MarkCondition(err, usr.Status.MarkJWTSecretFailed, usr.Status.MarkJWTSecretUnknown)
 
 		return AsResult(err)
 	}
+
+	usr.Status.MarkJWTSecretReady()
 
 	logger.V(1).Info("reconciling user credential secret")
 
@@ -208,111 +209,21 @@ func (r *UserReconciler) reconcileJWTSecret(ctx context.Context, usr *v1alpha1.U
 	// timestamped with the `iat` claim so will never match.
 	wantClaims, nextJWT, err := nsc.CreateUserClaims(usr, account, issuerKP)
 	if err != nil {
-		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		return "", TerminalError(err)
+		return "", TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to create user JWT claims: %w", err))
 	}
 
 	got, err := r.CoreV1.Secrets(usr.Namespace).Get(ctx, usr.Spec.JWTSecretName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("JWT secret not found, creating new secret")
+			logger.V(1).Info("JWT secret not found, creating new secret")
 
-			err := r.createJWTSecret(ctx, usr, nextJWT)
-			if err != nil {
-				return "", err
-			}
-
-			return nextJWT, nil
+			return nextJWT, r.createJWTSecret(ctx, usr, nextJWT)
 		}
 
-		logger.Error(err, "failed to get JWT secret")
-
-		usr.Status.MarkJWTSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
-
-		return "", err
+		return "", TemporaryError(ConditionUnknown(v1alpha1.ReasonUnknownError, "failed to get JWT secret: %w", err))
 	}
 
 	return r.ensureJWTSecretUpToDate(ctx, usr, wantClaims, got, nextJWT)
-}
-
-func (r *UserReconciler) createJWTSecret(ctx context.Context, usr *v1alpha1.User, userJWT string) error {
-	logger := log.FromContext(ctx)
-
-	secret, err := resources.NewJWTSecretBuilder(r.Scheme).Build(usr, userJWT)
-	if err != nil {
-		logger.Error(err, "failed to build account keypair secret")
-
-		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		return TerminalError(err)
-	}
-
-	if err := r.Client.Create(ctx, secret); err != nil {
-		logger.Error(err, "failed to create account JWT secret")
-
-		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		// we shouldn't expect any errors here, so communicate up to the controller that this should be retried.
-		return TemporaryError(err)
-	}
-
-	r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "JWTSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
-
-	return nil
-}
-
-// ensureJWTSecretUpToDate compares that the existing JWT secret decodes and matches the expected claims, if it does not
-// match the secret will be updated with the nextJWT value.
-func (r *UserReconciler) ensureJWTSecretUpToDate(ctx context.Context, usr *v1alpha1.User, wantClaims *jwt.UserClaims, got *v1.Secret, nextJWT string) (string, error) {
-	logger := log.FromContext(ctx)
-
-	gotJWT, ok := got.Data[v1alpha1.NatsSecretJWTKey]
-	if !ok {
-		// TODO: should we be checking owner references here? If we own it then we should be okay to delete it, but if
-		//  not we tell the user to delete it manually, and they'll either do so, or update the spec to use a new name.
-		usr.Status.MarkJWTSecretFailed(v1alpha1.ReasonInvalidJWTSecret, "JWT secret does not contain JWT data, delete the secret to generate a new JWT")
-
-		return "", TerminalError(fmt.Errorf("JWT secret does not contain JWT data, delete the secret to generate a new JWT"))
-	}
-
-	gotClaims, err := jwt.Decode(string(gotJWT))
-	switch {
-	case err != nil:
-		logger.Info("failed to decode JWT from secret, updating to latest version", "reason", err.Error())
-	case !nsc.Equality.DeepEqual(gotClaims, wantClaims):
-		logger.V(1).Info("existing JWT secret does not match desired claims, updating to latest version")
-	default:
-		logger.V(1).Info("existing JWT secret matches desired claims, no update required")
-
-		usr.Status.MarkJWTSecretReady()
-
-		return string(gotJWT), nil
-	}
-
-	want, err := resources.NewJWTSecretBuilderFromSecret(got, r.Scheme).Build(usr, nextJWT)
-	if err != nil {
-		logger.Error(err, "failed to build desired JWT secret")
-
-		usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
-
-		return "", TemporaryError(err)
-	}
-
-	err = r.Client.Update(ctx, want)
-	if err != nil {
-		logger.Error(err, "failed to update JWT secret")
-
-		usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
-
-		return "", TemporaryError(err)
-	}
-
-	r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "SeedSecretUpdated", "updated secret: %s/%s", want.Namespace, want.Name)
-
-	usr.Status.MarkJWTSecretReady()
-
-	return nextJWT, nil
 }
 
 func (r *UserReconciler) getCAIfExists(ctx context.Context, acc *v1alpha1.Account) ([]byte, error) {

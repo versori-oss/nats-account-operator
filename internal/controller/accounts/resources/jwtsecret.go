@@ -26,11 +26,17 @@ func NewJWTSecretBuilder(scheme *runtime.Scheme) *JWTSecretBuilder {
 func NewJWTSecretBuilderFromSecret(s *v1.Secret, scheme *runtime.Scheme) *JWTSecretBuilder {
 	return &JWTSecretBuilder{
 		scheme: scheme,
-		secret: s,
+		secret: s.DeepCopy(),
 	}
 }
 
-func (b *JWTSecretBuilder) Build(obj client.Object, jwt string) (*v1.Secret, error) {
+func (b *JWTSecretBuilder) Build(obj client.Object, jwt string, opts ...SecretOption) (*v1.Secret, error) {
+	for _, opt := range opts {
+		if err := opt(b.secret); err != nil {
+			return nil, fmt.Errorf("failed to apply option: %w", err)
+		}
+	}
+
 	if b.secret.Annotations == nil {
 		b.secret.Annotations = make(map[string]string)
 	}

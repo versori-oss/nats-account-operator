@@ -29,7 +29,7 @@ func NewUserCredentialSecretBuilder(scheme *runtime.Scheme, ca []byte) *UserCred
 func NewUserCredentialSecretBuilderFromSecret(s *corev1.Secret, scheme *runtime.Scheme, ca []byte) *UserCredentialSecretBuilder {
 	return &UserCredentialSecretBuilder{
 		scheme: scheme,
-		secret: s,
+		secret: s.DeepCopy(),
 		ca:     ca,
 	}
 }

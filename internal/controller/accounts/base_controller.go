@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -18,6 +19,7 @@ import (
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/internal/controller/accounts/resources"
 	accountsv1alpha1 "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 type NKeyFactory func() (nkeys.KeyPair, error)
@@ -30,7 +32,7 @@ type BaseReconciler struct {
 	EventRecorder    record.EventRecorder
 }
 
-func (r *BaseReconciler) reconcileSeedSecret(ctx context.Context, owner client.Object, newKP NKeyFactory, secretName string) (*v1alpha1.KeyPair, []byte, error) {
+func (r *BaseReconciler) reconcileSeedSecret(ctx context.Context, owner client.Object, newKP NKeyFactory, secretName string, secretOpts ...resources.SecretOption) (*v1alpha1.KeyPair, []byte, error) {
 	logger := log.FromContext(ctx)
 
 	got, err := r.CoreV1.Secrets(owner.GetNamespace()).Get(ctx, secretName, metav1.GetOptions{})
@@ -38,7 +40,7 @@ func (r *BaseReconciler) reconcileSeedSecret(ctx context.Context, owner client.O
 		if errors.IsNotFound(err) {
 			logger.V(1).Info("seed secret does not exist, creating")
 
-			return r.createSeedSecret(ctx, owner, newKP)
+			return r.createSeedSecret(ctx, owner, newKP, secretOpts...)
 		}
 
 		return nil, nil, TemporaryError(ConditionUnknown(v1alpha1.ReasonUnknownError, "failed to get seed secret: %w", err))
@@ -46,12 +48,12 @@ func (r *BaseReconciler) reconcileSeedSecret(ctx context.Context, owner client.O
 
 	logger.V(2).Info("found existing seed secret, ensuring it is up to date")
 
-	kp, err := r.ensureSeedSecretUpToDate(ctx, owner, got)
+	kp, err := r.ensureSeedSecretUpToDate(ctx, owner, got, secretOpts...)
 
 	return kp, got.Data[v1alpha1.NatsSecretSeedKey], err
 }
 
-func (r *BaseReconciler) ensureSeedSecretUpToDate(ctx context.Context, owner client.Object, got *v1.Secret) (*v1alpha1.KeyPair, error) {
+func (r *BaseReconciler) ensureSeedSecretUpToDate(ctx context.Context, owner client.Object, got *v1.Secret, secretOpts ...resources.SecretOption) (*v1alpha1.KeyPair, error) {
 	logger := log.FromContext(ctx)
 
 	seed, ok := got.Data[v1alpha1.NatsSecretSeedKey]
@@ -71,7 +73,7 @@ func (r *BaseReconciler) ensureSeedSecretUpToDate(ctx context.Context, owner cli
 		return nil, TerminalError(ConditionFailed(v1alpha1.ReasonMalformedSeedSecret, "failed to get PublicKey from KeyPair: %w", err))
 	}
 
-	want, err := resources.NewKeyPairSecretBuilderFromSecret(got, r.Scheme).Build(owner, kp)
+	want, err := resources.NewKeyPairSecretBuilderFromSecret(got, r.Scheme).Build(owner, kp, secretOpts...)
 	if err != nil {
 		return nil, TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to build seed secret from existing secret: %w", err))
 	}
@@ -93,7 +95,7 @@ func (r *BaseReconciler) ensureSeedSecretUpToDate(ctx context.Context, owner cli
 	}, nil
 }
 
-func (r *BaseReconciler) createSeedSecret(ctx context.Context, obj client.Object, newKP NKeyFactory) (*v1alpha1.KeyPair, []byte, error) {
+func (r *BaseReconciler) createSeedSecret(ctx context.Context, obj client.Object, newKP NKeyFactory, secretOpts ...resources.SecretOption) (*v1alpha1.KeyPair, []byte, error) {
 	kp, err := newKP()
 	if err != nil {
 		return nil, nil, TemporaryError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to generate new KeyPair: %w", err))
@@ -110,7 +112,7 @@ func (r *BaseReconciler) createSeedSecret(ctx context.Context, obj client.Object
 			v1alpha1.ReasonMalformedSeedSecret, "failed to get PublicKey from nkey.KeyPair: %w", err))
 	}
 
-	secret, err := resources.NewKeyPairSecretBuilder(r.Scheme).Build(obj, kp)
+	secret, err := resources.NewKeyPairSecretBuilder(r.Scheme).Build(obj, kp, secretOpts...)
 	if err != nil {
 		return nil, nil, TemporaryError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to build seed secret: %w", err))
 	}
@@ -125,6 +127,81 @@ func (r *BaseReconciler) createSeedSecret(ctx context.Context, obj client.Object
 		PublicKey:      pubkey,
 		SeedSecretName: secret.Name,
 	}, seed, nil
+}
+
+func (r *BaseReconciler) createJWTSecret(ctx context.Context, obj client.Object, jwt string) error {
+	secret, err := resources.NewJWTSecretBuilder(r.Scheme).Build(obj, jwt)
+	if err != nil {
+		return TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to build account keypair secret: %w", err))
+	}
+
+	if err := r.Client.Create(ctx, secret); err != nil {
+		return TemporaryError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to create account JWT secret: %w", err))
+	}
+
+	r.EventRecorder.Eventf(obj, v1.EventTypeNormal, "JWTSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
+
+	return nil
+}
+
+// ensureJWTSecretUpToDate compares that the existing JWT secret decodes and matches the expected claims, if it does not
+// match the secret will be updated with the nextJWT value.
+func (r *BaseReconciler) ensureJWTSecretUpToDate(ctx context.Context, acc client.Object, wantClaims any, got *v1.Secret, nextJWT string) (string, error) {
+	logger := log.FromContext(ctx)
+
+	gotJWT, ok := got.Data[v1alpha1.NatsSecretJWTKey]
+	if !ok {
+		for _, ownerRef := range got.OwnerReferences {
+			if ownerRef.UID == acc.GetUID() {
+				logger.Info("existing JWT secret does not contain JWT data, deleting to generate a new JWT")
+
+				err := r.Client.Delete(ctx, got)
+				if err != nil {
+					logger.Error(err, "failed to delete JWT secret")
+
+					return "", TemporaryError(ConditionUnknown(v1alpha1.ReasonUnknownError, "failed to delete invalid JWT secret: %w", err))
+				}
+
+				r.EventRecorder.Eventf(acc, v1.EventTypeNormal, "JWTSecretDeleted", "deleted secret: %s/%s", got.Namespace, got.Name)
+
+				return nextJWT, r.createJWTSecret(ctx, acc, nextJWT)
+			}
+		}
+
+		return "", TerminalError(ConditionFailed(v1alpha1.ReasonInvalidJWTSecret, "JWT secret does not contain JWT data and is not owned by this controller"))
+	}
+
+	gotClaims, err := jwt.Decode(string(gotJWT))
+	switch {
+	case err != nil:
+		logger.Info("failed to decode JWT from secret, updating to latest version", "reason", err.Error())
+	case !nsc.Equality.DeepEqual(gotClaims, wantClaims):
+		logger.V(1).Info("existing JWT secret does not match desired claims, updating to latest version")
+	default:
+		logger.V(1).Info("existing JWT secret matches desired claims, no update required")
+
+		return string(gotJWT), nil
+	}
+
+	want, err := resources.NewJWTSecretBuilderFromSecret(got, r.Scheme).Build(acc, nextJWT)
+	if err != nil {
+		return "", TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to build desired JWT secret: %w", err))
+	}
+
+	err = r.Client.Update(ctx, want)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nextJWT, r.createJWTSecret(ctx, acc, nextJWT)
+		}
+
+		logger.Error(err, "failed to update JWT secret")
+
+		return "", TemporaryError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to update JWT secret: %w", err))
+	}
+
+	r.EventRecorder.Eventf(acc, v1.EventTypeNormal, "JWTSecretUpdated", "updated secret: %s/%s", want.Namespace, want.Name)
+
+	return nextJWT, nil
 }
 
 // resolveIssuer resolves the issuer reference to a KeyPairable object. This is abstracted to support issuers being
@@ -187,11 +264,11 @@ func (r *BaseReconciler) resolveIssuer(ctx context.Context, issuer v1alpha1.Issu
 	// Initialize the conditions if they are not already set, not doing this causes a nil-pointer dereference panic
 	conditions.InitializeConditions()
 
-	seedReadyCondition := conditions.GetCondition(v1alpha1.KeyPairableConditionSeedSecretReady)
-	if !seedReadyCondition.IsTrue() {
-		logger.V(1).Info("issuer seed secret is not ready", "issuer_type", fmt.Sprintf("%T", issuer), "reason", seedReadyCondition.Reason, "message", seedReadyCondition.Message)
+	readyCondition := conditions.GetTopLevelCondition()
+	if !readyCondition.IsTrue() {
+		logger.V(1).Info("issuer seed secret is not ready", "issuer_type", fmt.Sprintf("%T", issuer), "reason", readyCondition.Reason, "message", readyCondition.Message)
 
-		return nil, TemporaryError(ConditionUnknown(
+		return nil, TemporaryError(ConditionFailed(
 			v1alpha1.ReasonNotReady, "issuer seed secret is not ready"))
 	}
 

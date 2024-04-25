@@ -62,3 +62,8 @@ type SigningKeyOwnerReference struct {
 	Kind       string `json:"kind"`
 	Name       string `json:"name"`
 }
+
+type KeyPairReference struct {
+	InferredObjectReference `json:",inline"`
+	PublicKey string `json:"publicKey"`
+}

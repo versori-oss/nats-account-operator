@@ -38,7 +38,7 @@ func (os *OperatorStatus) InitializeConditions() {
 	operatorConditionSet.Manage(os).InitializeConditions()
 }
 
-func (os *OperatorStatus) MarkSystemAccountResolved(ref InferredObjectReference) {
+func (os *OperatorStatus) MarkSystemAccountResolved(ref KeyPairReference) {
 	os.ResolvedSystemAccount = &ref
 
 	operatorConditionSet.Manage(os).MarkTrue(OperatorConditionSystemAccountResolved)

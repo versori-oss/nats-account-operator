@@ -44,6 +44,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/internal/controller/accounts/resources"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 // OperatorReconciler reconciles a Operator object
@@ -91,7 +93,7 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 		}
 	}()
 
-	kp, _, err := r.reconcileSeedSecret(ctx, operator, nkeys.CreateOperator, operator.Spec.SeedSecretName)
+	kp, seed, err := r.reconcileSeedSecret(ctx, operator, nkeys.CreateOperator, operator.Spec.SeedSecretName, resources.Immutable())
 	if err != nil {
 		MarkCondition(err, operator.Status.MarkSeedSecretFailed, operator.Status.MarkSeedSecretUnknown)
 
@@ -100,8 +102,7 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 
 	operator.Status.MarkSeedSecretReady(*kp)
 
-	sysAccId, err := r.ensureSystemAccountResolved(ctx, operator)
-	if err != nil {
+	if err = r.ensureSystemAccountResolved(ctx, operator); err != nil {
 		logger.Error(err, "failed to resolve system account")
 
 		MarkCondition(err, operator.Status.MarkSystemAccountResolveFailed, operator.Status.MarkSystemAccountResolveUnknown)
@@ -109,8 +110,7 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 		return AsResult(err)
 	}
 
-	sKeys, err := r.ensureSigningKeysUpdated(ctx, operator)
-	if err != nil {
+	if err = r.ensureSigningKeysUpdated(ctx, operator); err != nil {
 		if errors.IsNotFound(err) {
 			logger.V(1).Info("signing keys not found, requeuing")
 			result.RequeueAfter = time.Second * 30
@@ -123,106 +123,59 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureJWTSecret(ctx, operator, sKeys, sysAccId); err != nil {
-		logger.Error(err, "failed to ensure JWT secret")
+	err = r.reconcileJWTSecret(ctx, operator, seed)
+	if err != nil {
+		MarkCondition(err, operator.Status.MarkJWTSecretFailed, operator.Status.MarkJWTSecretUnknown)
 
-		return ctrl.Result{}, err
+		return AsResult(err)
 	}
+
+	operator.Status.MarkJWTSecretReady()
+
 
 	return ctrl.Result{}, nil
 }
 
-func (r *OperatorReconciler) ensureJWTSecret(ctx context.Context, operator *v1alpha1.Operator, sKeys []v1alpha1.SigningKeyEmbeddedStatus, sysAccId string) error {
+func (r *OperatorReconciler) reconcileJWTSecret(ctx context.Context, operator *v1alpha1.Operator, seed []byte) error {
 	logger := log.FromContext(ctx)
 
-	seedSecret, err := r.CoreV1.Secrets(operator.Namespace).Get(ctx, operator.Spec.SeedSecretName, metav1.GetOptions{})
-	if errors.IsNotFound(err) {
-		logger.V(1).Info("seed secret not found, skipping jwt secret creation")
-		operator.Status.MarkJWTSecretFailed("seed secret not found", "")
-
-		return nil
+	signingKey, err := nkeys.FromSeed(seed)
+	if err != nil {
+		return TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to get signing key from seed: %w", err))
 	}
 
-	sKeysPublicKeys := make([]string, len(sKeys))
-	for i, sk := range sKeys {
-		sKeysPublicKeys[i] = sk.KeyPair.PublicKey
+	// we want to check that any existing secret decodes to match wantClaims, if it doesn't then we will use nextJWT
+	// to create/update the secret. We cannot just compare the JWTs from the secret and accountJWT because the JWTs are
+	// timestamped with the `iat` claim so will never match.
+	wantClaims, nextJWT, err := nsc.CreateOperatorClaims(operator, signingKey)
+	if err != nil {
+		return TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to create account JWT claims: %w", err))
 	}
 
-	operatorPublicKey := string(seedSecret.Data[v1alpha1.NatsSecretPublicKeyKey])
+	got, err := r.CoreV1.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("JWT secret not found, creating new secret")
 
-	jwtSec, err := r.CoreV1.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
-	if errors.IsNotFound(err) {
-		op := jwt.Operator{
-			SigningKeys:         sKeysPublicKeys,
-			AccountServerURL:    operator.Spec.AccountServerURL,
-			OperatorServiceURLs: operator.Spec.OperatorServiceURLs,
-			SystemAccount:       sysAccId, // This should be resolved at this point
-		}
-		opClaims := jwt.NewOperatorClaims(operator.Status.KeyPair.PublicKey)
-		opClaims.Name = operator.Name
-		opClaims.Issuer = operatorPublicKey
-		opClaims.IssuedAt = time.Now().Unix()
-		opClaims.Type = jwt.OperatorClaim
-		opClaims.Operator = op
-
-		keys, err := nkeys.ParseDecoratedNKey(seedSecret.Data[v1alpha1.NatsSecretSeedKey])
-		if err != nil {
-			logger.Error(err, "failed to get nkeys from seed")
-			return err
-		}
-		jwt, err := opClaims.Encode(keys)
-		if err != nil {
-			logger.Error(err, "failed to encode operator claims")
-			return err
+			return r.createJWTSecret(ctx, operator, nextJWT)
 		}
 
-		data := map[string][]byte{
-			v1alpha1.NatsSecretJWTKey: []byte(jwt),
-		}
-
-		labels := map[string]string{
-			"operator-name": operator.Name,
-		}
-
-		jwtSecret := NewSecret(operator.Spec.JWTSecretName, operator.Namespace, WithData(data), WithLabels(labels), WithImmutable(false))
-
-		err = ctrl.SetControllerReference(operator, &jwtSecret, r.Scheme)
-		if err != nil {
-			logger.Error(err, "failed to set controller reference")
-			return err
-		}
-
-		_, err = r.CoreV1.Secrets(operator.Namespace).Create(ctx, &jwtSecret, metav1.CreateOptions{})
-		if err != nil {
-			operator.Status.MarkJWTSecretFailed("failed to create jwt secret for operator", "operator: %s", operator.Name)
-			logger.Error(err, "failed to create jwt secret")
-			return err
-		}
-
-	} else if err != nil {
-		operator.Status.MarkJWTSecretFailed("could not find JWT secret for operator", "operator: %s", operator.Name)
-		logger.Error(err, "failed to get jwt secret")
-		return err
-	} else {
-		err := r.updateOperatorJWTSigningKeys(ctx, seedSecret.Data[v1alpha1.NatsSecretSeedKey], jwtSec, sKeysPublicKeys)
-		if err != nil {
-			logger.V(1).Info("failed to update operator JWT with signing keys", "error", err)
-			operator.Status.MarkJWTSecretFailed("failed to update JWT with signing keys", "")
-			return nil
-		}
+		return TemporaryError(ConditionUnknown(v1alpha1.ReasonUnknownError, "failed to get JWT secret: %w", err))
 	}
 
-	operator.Status.MarkJWTSecretReady()
-	return nil
+	_, err = r.ensureJWTSecretUpToDate(ctx, operator, wantClaims, got, nextJWT)
+
+	return err
 }
 
-func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, operator *v1alpha1.Operator) ([]v1alpha1.SigningKeyEmbeddedStatus, error) {
+func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, operator *v1alpha1.Operator) error {
 	logger := log.FromContext(ctx)
 
 	skList, err := r.AccountsV1Alpha1.SigningKeys(operator.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil || skList == nil {
 		logger.V(1).Info("failed to list signing keys", "error:", err)
-		return nil, err
+
+		return err
 	}
 
 	signingKeys := make([]v1alpha1.SigningKeyEmbeddedStatus, 0)
@@ -236,7 +189,8 @@ func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, opera
 	}
 
 	operator.Status.MarkSigningKeysUpdated(signingKeys)
-	return signingKeys, nil
+
+	return nil
 }
 
 // ensureSystemAccountResolved ensures we can resolve the system account for the operator, but doesn't require that the
@@ -245,7 +199,7 @@ func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, opera
 // When setting up a new NATS deployment, we need both the system account public key, and the operator JWT to be
 // written to the cluster. The associated Account resource will never become ready because it cannot push to the
 // NATS deployment, so we update the operator's status correctly, but do not error out.
-func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, operator *v1alpha1.Operator) (string, error) {
+func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, operator *v1alpha1.Operator) error {
 	logger := log.FromContext(ctx)
 
 	var sysAcc v1alpha1.Account
@@ -253,21 +207,24 @@ func (r *OperatorReconciler) ensureSystemAccountResolved(ctx context.Context, op
 		Namespace: operator.Namespace,
 		Name:      operator.Spec.SystemAccountRef.Name,
 	}, &sysAcc); err != nil {
-		return "", ConditionFailed(v1alpha1.ReasonNotFound, "failed to get system account, %q: %w", operator.Spec.SystemAccountRef.Name, err)
+		return ConditionFailed(v1alpha1.ReasonNotFound, "failed to get system account, %q: %w", operator.Spec.SystemAccountRef.Name, err)
 	}
 
 	if !sysAcc.GetConditionSet().Manage(&sysAcc.Status).GetCondition(v1alpha1.KeyPairableConditionSeedSecretReady).IsTrue() {
 		logger.V(1).Info("system account does not have a KeyPair")
 
-		return "", ConditionFailed(v1alpha1.ReasonNotReady, "system account KeyPair not ready")
+		return ConditionFailed(v1alpha1.ReasonNotReady, "system account KeyPair not ready")
 	}
 
-	operator.Status.MarkSystemAccountResolved(v1alpha1.InferredObjectReference{
-		Namespace: sysAcc.GetNamespace(),
-		Name:      sysAcc.GetName(),
+	operator.Status.MarkSystemAccountResolved(v1alpha1.KeyPairReference{
+		InferredObjectReference: v1alpha1.InferredObjectReference{
+			Namespace: sysAcc.GetNamespace(),
+			Name:      sysAcc.GetName(),
+		},
+		PublicKey: sysAcc.Status.KeyPair.PublicKey,
 	})
 
-	return sysAcc.Status.KeyPair.PublicKey, nil
+	return nil
 }
 
 func (r *OperatorReconciler) updateOperatorJWTSigningKeys(ctx context.Context, operatorSeed []byte, jwtSecret *v1.Secret, sKeys []string) error {
@@ -310,6 +267,8 @@ func (r *OperatorReconciler) updateOperatorJWTSigningKeys(ctx context.Context, o
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OperatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.EventRecorder = mgr.GetEventRecorderFor("operator-controller")
+
 	logger := mgr.GetLogger().WithName("OperatorReconciler")
 
 	return ctrl.NewControllerManagedBy(mgr).
