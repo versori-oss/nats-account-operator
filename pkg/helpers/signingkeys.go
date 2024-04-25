@@ -13,7 +13,11 @@ import (
 // update on the status. New SigningKeys are appended to the end of the list, and SigningKeys which are no longer active
 // are removed from the list. Any changes to existing SigningKeys are kept at the same index (however removals may cause
 // indices to shift).
-func NextSigningKeys(ownerUID types.UID, current []v1alpha1.SigningKeyEmbeddedStatus, next *v1alpha1.SigningKeyList) []v1alpha1.SigningKeyEmbeddedStatus {
+func NextSigningKeys(
+	ownerUID types.UID,
+	current []v1alpha1.SigningKeyEmbeddedStatus,
+	next *v1alpha1.SigningKeyList,
+) []v1alpha1.SigningKeyEmbeddedStatus {
 	existingSKs := make(map[string]v1alpha1.SigningKeyEmbeddedStatus)
 	for _, sk := range current {
 		existingSKs[sk.Name] = sk

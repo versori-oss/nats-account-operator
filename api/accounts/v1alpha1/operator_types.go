@@ -91,7 +91,7 @@ type OperatorStatus struct {
 
 	// ResolvedSystemAccount is the Account that this Operator will use as it's system account. This is the same as the
 	// resource defined in OperatorSpec.SystemAccountRef, but validated that the resource exists.
-	ResolvedSystemAccount *InferredObjectReference `json:"resolvedSystemAccount,omitempty"`
+	ResolvedSystemAccount *KeyPairReference `json:"resolvedSystemAccount,omitempty"`
 }
 
 func (os *OperatorStatus) GetConditions() apis.Conditions {

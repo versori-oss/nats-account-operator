@@ -15,6 +15,19 @@ spec:
       apiVersion: accounts.nats.io/v1alpha1
       kind: Operator
       name: operator
+      namespace: nats-io
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: SigningKey
+metadata:
+  name: test-2-sk1
+  namespace: default
+spec:
+  ownerRef:
+    apiVersion: accounts.nats.io/v1alpha1
+    kind: Account
+    name: test-2
+  seedSecretName: test-2-sk1-seed
 ---
 apiVersion: accounts.nats.io/v1alpha1
 kind: User
@@ -28,5 +41,5 @@ spec:
   issuer:
     ref:
       apiVersion: accounts.nats.io/v1alpha1
-      kind: Account
-      name: test-2
+      kind: SigningKey
+      name: test-2-sk1

@@ -2,21 +2,33 @@ apiVersion: accounts.nats.io/v1alpha1
 kind: Operator
 metadata:
   name: operator
-  namespace: default
+  namespace: nats-io
 spec:
   accountServerURL: nats://localhost:4222
   jwtSecretName: operator-jwt
   seedSecretName: operator-seed
   operatorServiceURLs:
-    - nats://localhost:4222
+    - nats://nats.nats-io.svc.cluster.local:4222
   systemAccountRef:
     name: system
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: SigningKey
+metadata:
+  name: operator-sk1
+  namespace: nats-io
+spec:
+  ownerRef:
+    apiVersion: accounts.nats.io/v1alpha1
+    kind: Operator
+    name: operator
+  seedSecretName: operator-sk1-seed
 ---
 apiVersion: accounts.nats.io/v1alpha1
 kind: Account
 metadata:
   name: system
-  namespace: default
+  namespace: nats-io
 spec:
   seedSecretName: system-seed
   jwtSecretName: system-jwt
@@ -30,7 +42,7 @@ apiVersion: accounts.nats.io/v1alpha1
 kind: User
 metadata:
   name: system-user
-  namespace: default
+  namespace: nats-io
 spec:
   jwtSecretName: system-user-jwt
   seedSecretName: system-user-seed
@@ -40,3 +52,33 @@ spec:
       apiVersion: accounts.nats.io/v1alpha1
       kind: Account
       name: system
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: Account
+metadata:
+  name: sk-owner
+  namespace: default
+spec:
+  jwtSecretName: sk-owner-jwt
+  seedSecretName: sk-owner-seed
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: SigningKey
+      name: operator-sk1
+      namespace: nats-io
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: User
+metadata:
+  name: sk-owner-user
+  namespace: default
+spec:
+  jwtSecretName: sk-owner-user-jwt
+  seedSecretName: sk-owner-user-seed
+  credentialsSecretName: sk-owner-user-nats-creds
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: Account
+      name: sk-owner

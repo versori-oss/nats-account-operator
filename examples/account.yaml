@@ -15,6 +15,7 @@ spec:
       apiVersion: accounts.nats.io/v1alpha1
       kind: Operator
       name: operator
+      namespace: nats-io
 ---
 apiVersion: accounts.nats.io/v1alpha1
 kind: User

@@ -1,7 +1,7 @@
-## Append samples you want in your CSV to this file as resources ##
+## Append samples of your project ##
 resources:
-- _v1alpha1_operator.yaml
-- _v1alpha1_account.yaml
-- _v1alpha1_user.yaml
-- _v1alpha1_signingkey.yaml
+- accounts_v1alpha1_operator.yaml
+- accounts_v1alpha1_account.yaml
+- accounts_v1alpha1_signingkey.yaml
+- accounts_v1alpha1_user.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples
