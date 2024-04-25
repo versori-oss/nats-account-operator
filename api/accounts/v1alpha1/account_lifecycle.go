@@ -100,11 +100,8 @@ func (s *AccountStatus) MarkJWTSecretUnknown(reason, messageFormat string, messa
 	accountConditionSet.Manage(s).MarkUnknown(AccountConditionJWTSecretReady, reason, messageFormat, messageA...)
 }
 
-func (s *AccountStatus) MarkSeedSecretReady(publicKey, seedSecretName string) {
-	s.KeyPair = &KeyPair{
-		PublicKey:      publicKey,
-		SeedSecretName: seedSecretName,
-	}
+func (s *AccountStatus) MarkSeedSecretReady(kp KeyPair) {
+	s.KeyPair = &kp
 
 	accountConditionSet.Manage(s).MarkTrue(KeyPairableConditionSeedSecretReady)
 }

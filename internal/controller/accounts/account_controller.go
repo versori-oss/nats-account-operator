@@ -48,7 +48,6 @@ import (
 
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/internal/controller/accounts/resources"
-	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/pkg/helpers"
 	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
@@ -58,7 +57,6 @@ const AccountFinalizer = "accounts.nats.io/finalizer"
 // AccountReconciler reconciles an Account object
 type AccountReconciler struct {
 	*BaseReconciler
-	AccountsV1Alpha1 accountsclientsets.AccountsV1alpha1Interface
 	SysAccountLoader *nsc.SystemAccountLoader
 }
 
@@ -79,10 +77,12 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	if err := r.Client.Get(ctx, req.NamespacedName, acc); err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("account deleted")
+
 			return ctrl.Result{}, nil
 		}
 
 		logger.Error(err, "failed to get account")
+
 		return ctrl.Result{}, err
 	}
 
@@ -124,10 +124,16 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 		return ctrl.Result{}, nil
 	}
 
-	ok, err := r.reconcileSeedSecret(ctx, acc)
-	if err != nil || !ok {
-		return ctrl.Result{}, err
+	kp, _, err := r.reconcileSeedSecret(ctx, acc, nkeys.CreateAccount, acc.Spec.SeedSecretName)
+	if err != nil {
+		logger.Error(err, "failed to reconcile seed secret")
+
+		MarkCondition(err, acc.Status.MarkSeedSecretFailed, acc.Status.MarkSeedSecretUnknown)
+
+		return AsResult(err)
 	}
+
+	acc.Status.MarkSeedSecretReady(*kp)
 
 	// get the KeyPairable which will be used to sign the Account JWT
 	keyPairable, err := r.resolveIssuer(ctx, acc.Spec.Issuer, acc.Namespace)
@@ -218,133 +224,6 @@ func (r *AccountReconciler) resolveOperator(ctx context.Context, acc *v1alpha1.A
 	})
 
 	return operator, nil
-}
-
-// reconcileSeedSecret handles the v1alpha1.KeyPairableConditionSeedSecretReady condition. It ensures that a secret
-// exists containing a valid keypair for the Account, updating it if it's not up-to-date and creating it if it doesn't
-// exist.
-func (r *AccountReconciler) reconcileSeedSecret(ctx context.Context, acc *v1alpha1.Account) (bool, error) {
-	logger := log.FromContext(ctx)
-
-	got, err := r.CoreV1.Secrets(acc.Namespace).Get(ctx, acc.Spec.SeedSecretName, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			logger.V(1).Info("account seed secret not found, generating new keypair")
-
-			return true, r.createSeedSecret(ctx, acc)
-		}
-
-		logger.Error(err, "failed to get account seed secret")
-
-		acc.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
-
-		return false, err
-	}
-
-	return r.ensureSeedSecretUpToDate(ctx, acc, got)
-}
-
-func (r *AccountReconciler) createSeedSecret(ctx context.Context, acc *v1alpha1.Account) error {
-	logger := log.FromContext(ctx)
-
-	kp, err := nkeys.CreateAccount()
-	if err != nil {
-		logger.Error(err, "failed to create account keypair")
-
-		acc.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		return err
-	}
-
-	secret, err := resources.NewKeyPairSecretBuilder(r.Scheme).Build(acc, kp)
-	if err != nil {
-		logger.Error(err, "failed to build account keypair secret")
-
-		acc.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		return err
-	}
-
-	if err = controllerutil.SetControllerReference(acc, secret, r.Scheme); err != nil {
-		logger.Error(err, "failed to set account keypair secret controller reference")
-
-		acc.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		return err
-	}
-
-	if err := r.Client.Create(ctx, secret); err != nil {
-		logger.Error(err, "failed to create account keypair secret")
-
-		acc.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		return err
-	}
-
-	r.EventRecorder.Eventf(acc, v1.EventTypeNormal, "SeedSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
-
-	pubkey, err := kp.PublicKey()
-	if err != nil {
-		logger.Error(err, "failed to get account public key")
-
-		acc.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		return err
-	}
-
-	acc.Status.MarkSeedSecretReady(pubkey, secret.Name)
-
-	return nil
-}
-
-func (r *AccountReconciler) ensureSeedSecretUpToDate(ctx context.Context, acc *v1alpha1.Account, got *v1.Secret) (bool, error) {
-	logger := log.FromContext(ctx)
-
-	seed, ok := got.Data[v1alpha1.NatsSecretSeedKey]
-	if !ok {
-		// TODO: should we be checking owner references here? If we own it then we should be okay to delete it, but if
-		//  not we tell the user to delete it manually, and they'll either do so, or update the spec to use a new name.
-		acc.Status.MarkSeedSecretFailed(v1alpha1.ReasonInvalidSeedSecret, "seed secret does not contain seed data, delete the secret for a new keypair")
-
-		return false, nil
-	}
-
-	kp, err := nkeys.FromSeed(seed)
-	if err != nil {
-		acc.Status.MarkSeedSecretFailed(v1alpha1.ReasonInvalidSeedSecret, "failed to parse seed: %s", err.Error())
-
-		return false, nil
-	}
-
-	want, err := resources.NewKeyPairSecretBuilderFromSecret(got, r.Scheme).Build(acc, kp)
-	if err != nil {
-		logger.Error(err, "failed to build desired keypair secret")
-
-		acc.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
-
-		return false, err
-	}
-
-	if !equality.Semantic.DeepEqual(got, want) {
-		logger.V(1).Info("seed secret does not match desired state, updating")
-
-		err = r.Client.Update(ctx, want)
-		if err != nil {
-			logger.Error(err, "failed to update seed secret")
-
-			acc.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
-
-			return false, err
-		}
-
-		r.EventRecorder.Eventf(acc, v1.EventTypeNormal, "SeedSecretUpdated", "updated secret: %s/%s", want.Namespace, want.Name)
-	}
-
-	pubkey, _ := kp.PublicKey()
-
-	acc.Status.MarkSeedSecretReady(pubkey, want.Name)
-
-	return true, nil
 }
 
 func (r *AccountReconciler) ensureSigningKeysUpdated(ctx context.Context, acc *v1alpha1.Account) error {

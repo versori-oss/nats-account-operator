@@ -36,21 +36,17 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/internal/controller/accounts/resources"
-	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
 
 // UserReconciler reconciles a User object
 type UserReconciler struct {
 	*BaseReconciler
-	AccountsClientSet accountsclientsets.AccountsV1alpha1Interface
-	EventRecorder     record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups=accounts.nats.io,resources=users,verbs=get;list;watch;create;update;patch;delete
@@ -89,10 +85,16 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 		}
 	}()
 
-	seed, err := r.reconcileSeedSecret(ctx, usr)
+	kp, seed, err := r.reconcileSeedSecret(ctx, usr, nkeys.CreateUser, usr.Spec.SeedSecretName)
 	if err != nil {
+		logger.Error(err, "failed to reconcile seed secret")
+
+		MarkCondition(err, usr.Status.MarkSeedSecretFailed, usr.Status.MarkSeedSecretUnknown)
+
 		return AsResult(err)
 	}
+
+	usr.Status.MarkSeedSecretReady(*kp)
 
 	// get the KeyPairable which will be used to sign the JWT, resolveIssuer is part of BaseReconciler which doesn't
 	// mark conditions (since it doesn't know what resource type it's reconciling), so we need to check for condition
@@ -129,89 +131,6 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 	}
 
 	return ctrl.Result{}, nil
-}
-
-// reconcileSeedSecret handles the v1alpha1.KeyPairableConditionSeedSecretReady condition. It ensures that a secret
-// exists containing a valid keypair for the Account, updating it if it's not up-to-date and creating it if it doesn't
-// exist.
-func (r *UserReconciler) reconcileSeedSecret(ctx context.Context, usr *v1alpha1.User) (seed []byte, err error) {
-	logger := log.FromContext(ctx)
-
-	got, err := r.CoreV1.Secrets(usr.Namespace).Get(ctx, usr.Spec.SeedSecretName, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			logger.V(1).Info("account seed secret not found, generating new keypair")
-
-			return r.createSeedSecret(ctx, usr)
-		}
-
-		logger.Error(err, "failed to get account seed secret")
-
-		usr.Status.MarkSeedSecretUnknown(v1alpha1.ReasonUnknownError, err.Error())
-
-		return nil, TemporaryError(err)
-	}
-
-	kp, err := r.ensureSeedSecretUpToDate(ctx, usr, got)
-	if err != nil {
-		MarkCondition(err, usr.Status.MarkSeedSecretFailed, usr.Status.MarkSeedSecretUnknown)
-
-		return nil, err
-	}
-
-	seedBytes, _ := kp.Seed()
-	pubkey, _ := kp.PublicKey()
-
-	usr.Status.MarkSeedSecretReady(pubkey, usr.Spec.SeedSecretName)
-
-	return seedBytes, nil
-}
-
-func (r *UserReconciler) createSeedSecret(ctx context.Context, usr *v1alpha1.User) (seed []byte, err error) {
-	logger := log.FromContext(ctx)
-
-	kp, err := nkeys.CreateUser()
-	if err != nil {
-		logger.Error(err, "failed to create user keypair")
-
-		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		return nil, TemporaryError(err)
-	}
-
-	secret, err := resources.NewKeyPairSecretBuilder(r.Scheme).Build(usr, kp)
-	if err != nil {
-		logger.Error(err, "failed to build user keypair secret")
-
-		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		return nil, TemporaryError(err)
-	}
-
-	if err := r.Client.Create(ctx, secret); err != nil {
-		logger.Error(err, "failed to create user keypair secret")
-
-		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		return nil, TemporaryError(err)
-	}
-
-	r.EventRecorder.Eventf(usr, v1.EventTypeNormal, "SeedSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
-
-	pubkey, err := kp.PublicKey()
-	if err != nil {
-		logger.Error(err, "failed to get user public key")
-
-		usr.Status.MarkSeedSecretFailed(v1alpha1.ReasonUnknownError, err.Error())
-
-		return nil, TemporaryError(err)
-	}
-
-	seedBytes, _ := kp.Seed()
-
-	usr.Status.MarkSeedSecretReady(pubkey, secret.Name)
-
-	return seedBytes, nil
 }
 
 // resolveAccount handles the v1alpha1.UserConditionAccountResolved condition and updating the
@@ -406,7 +325,7 @@ func (r *UserReconciler) getCAIfExists(ctx context.Context, acc *v1alpha1.Accoun
 
 	operatorRef := acc.Status.OperatorRef
 
-	opClient := r.AccountsClientSet.Operators(operatorRef.Namespace)
+	opClient := r.AccountsV1Alpha1.Operators(operatorRef.Namespace)
 	op, err := opClient.Get(ctx, operatorRef.Name, metav1.GetOptions{})
 	if err != nil {
 		logger.Error(err, "failed to retrieve the operator for account")

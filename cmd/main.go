@@ -30,6 +30,8 @@ import (
 	"flag"
 	"os"
 
+	"go.uber.org/zap/zapcore"
+	"k8s.io/client-go/kubernetes"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -45,6 +47,8 @@ import (
 
 	accountsv1alpha1 "github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	accountscontroller "github.com/versori-oss/nats-account-operator/internal/controller/accounts"
+	"github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned"
+	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -77,6 +81,7 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	opts := zap.Options{
 		Development: true,
+		StacktraceLevel: zapcore.PanicLevel,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -131,33 +136,60 @@ func main() {
 		os.Exit(1)
 	}
 
+	clientset, err := kubernetes.NewForConfigAndClient(mgr.GetConfig(), mgr.GetHTTPClient())
+	if err != nil {
+		setupLog.Error(err, "unable to create kubernetes.Clientset")
+		os.Exit(1)
+	}
+
+	coreV1CS := clientset.CoreV1()
+
+	accountsCS, err := versioned.NewForConfigAndClient(mgr.GetConfig(), mgr.GetHTTPClient())
+	if err != nil {
+		setupLog.Error(err, "unable to create accounts Clientset")
+		os.Exit(1)
+	}
+
+	accountsV1Alpha1 := accountsCS.AccountsV1alpha1()
+
 	if err = (&accountscontroller.OperatorReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		BaseReconciler: &accountscontroller.BaseReconciler{
+			Client:           mgr.GetClient(),
+			Scheme:           mgr.GetScheme(),
+			CoreV1:           coreV1CS,
+			AccountsV1Alpha1: accountsV1Alpha1,
+		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Operator")
 		os.Exit(1)
 	}
 	if err = (&accountscontroller.AccountReconciler{
 		BaseReconciler: &accountscontroller.BaseReconciler{
-			Scheme: mgr.GetScheme(),
-			Client: mgr.GetClient(),
+			Client:           mgr.GetClient(),
+			Scheme:           mgr.GetScheme(),
+			CoreV1:           coreV1CS,
+			AccountsV1Alpha1: accountsV1Alpha1,
 		},
+		SysAccountLoader: nsc.NewSystemAccountLoader(accountsV1Alpha1, coreV1CS),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Account")
 		os.Exit(1)
 	}
 	if err = (&accountscontroller.SigningKeyReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		CoreV1:           coreV1CS,
+		AccountsV1Alpha1: accountsV1Alpha1,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SigningKey")
 		os.Exit(1)
 	}
 	if err = (&accountscontroller.UserReconciler{
 		BaseReconciler: &accountscontroller.BaseReconciler{
-			Scheme: mgr.GetScheme(),
-			Client: mgr.GetClient(),
+			Client:           mgr.GetClient(),
+			Scheme:           mgr.GetScheme(),
+			CoreV1:           coreV1CS,
+			AccountsV1Alpha1: accountsV1Alpha1,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "User")

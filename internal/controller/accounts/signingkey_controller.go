@@ -53,9 +53,9 @@ import (
 // SigningKeyReconciler reconciles a SigningKey object
 type SigningKeyReconciler struct {
 	client.Client
-	Scheme            *runtime.Scheme
-	CV1Interface      corev1.CoreV1Interface
-	AccountsClientSet accountsclientsets.AccountsV1alpha1Interface
+	Scheme           *runtime.Scheme
+	CoreV1           corev1.CoreV1Interface
+	AccountsV1Alpha1 accountsclientsets.AccountsV1alpha1Interface
 }
 
 //+kubebuilder:rbac:groups=accounts.nats.io,resources=signingkeys,verbs=get;list;watch;create;update;patch;delete
@@ -101,13 +101,16 @@ func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.ensureOwnerResolved(ctx, signingKey); err != nil {
 		logger.V(1).Info("failed to resolve owner for signing key", "name", signingKey.Name)
 		signingKey.Status.MarkOwnerResolveFailed("failed to resolve owner", "%s:%s", signingKey.Spec.OwnerRef.Name, signingKey.Spec.OwnerRef.Kind)
+
 		return ctrl.Result{}, err
 	}
 
 	if err := r.ensureKeyPair(ctx, signingKey); err != nil {
 		logger.Error(err, "failed to ensure key pair")
+
 		return ctrl.Result{}, err
 	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -115,7 +118,7 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *v1
 	logger := log.FromContext(ctx)
 
 	var publicKey string
-	secret, err := r.CV1Interface.Secrets(signingKey.Namespace).Get(ctx, signingKey.Spec.SeedSecretName, metav1.GetOptions{})
+	secret, err := r.CoreV1.Secrets(signingKey.Namespace).Get(ctx, signingKey.Spec.SeedSecretName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		var keyPair nkeys.KeyPair
 		switch signingKey.Spec.OwnerRef.Kind {
@@ -160,7 +163,7 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *v1
 			return err
 		}
 
-		_, err = r.CV1Interface.Secrets(signingKey.Namespace).Create(ctx, &secret, metav1.CreateOptions{})
+		_, err = r.CoreV1.Secrets(signingKey.Namespace).Create(ctx, &secret, metav1.CreateOptions{})
 		if err != nil {
 			logger.Error(err, "failed to create seed secret")
 			return err

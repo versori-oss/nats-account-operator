@@ -76,14 +76,9 @@ spec:
                 description: SeedSecretName is the name of the secret containing the
                   seed for this signing key.
                 type: string
-              type:
-                description: Type defines which prefix to use for the signing key,
-                  supported values are "Operator" and "Account".
-                type: string
             required:
             - ownerRef
             - seedSecretName
-            - type
             type: object
           status:
             description: SigningKeyStatus defines the observed state of SigningKey

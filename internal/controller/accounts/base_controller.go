@@ -17,16 +17,41 @@ import (
 
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
 	"github.com/versori-oss/nats-account-operator/internal/controller/accounts/resources"
+	accountsv1alpha1 "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 )
+
+type NKeyFactory func() (nkeys.KeyPair, error)
 
 type BaseReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	CoreV1        corev1.CoreV1Interface
-	EventRecorder record.EventRecorder
+	Scheme           *runtime.Scheme
+	CoreV1           corev1.CoreV1Interface
+	AccountsV1Alpha1 accountsv1alpha1.AccountsV1alpha1Interface
+	EventRecorder    record.EventRecorder
 }
 
-func (r *BaseReconciler) ensureSeedSecretUpToDate(ctx context.Context, owner client.Object, got *v1.Secret) (nkeys.KeyPair, error) {
+func (r *BaseReconciler) reconcileSeedSecret(ctx context.Context, owner client.Object, newKP NKeyFactory, secretName string) (*v1alpha1.KeyPair, []byte, error) {
+	logger := log.FromContext(ctx)
+
+	got, err := r.CoreV1.Secrets(owner.GetNamespace()).Get(ctx, secretName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("seed secret does not exist, creating")
+
+			return r.createSeedSecret(ctx, owner, newKP)
+		}
+
+		return nil, nil, TemporaryError(ConditionUnknown(v1alpha1.ReasonUnknownError, "failed to get seed secret: %w", err))
+	}
+
+	logger.V(2).Info("found existing seed secret, ensuring it is up to date")
+
+	kp, err := r.ensureSeedSecretUpToDate(ctx, owner, got)
+
+	return kp, got.Data[v1alpha1.NatsSecretSeedKey], err
+}
+
+func (r *BaseReconciler) ensureSeedSecretUpToDate(ctx context.Context, owner client.Object, got *v1.Secret) (*v1alpha1.KeyPair, error) {
 	logger := log.FromContext(ctx)
 
 	seed, ok := got.Data[v1alpha1.NatsSecretSeedKey]
@@ -36,14 +61,19 @@ func (r *BaseReconciler) ensureSeedSecretUpToDate(ctx context.Context, owner cli
 
 	kp, err := nkeys.FromSeed(seed)
 	if err != nil {
-		return nil, TerminalError(ConditionFailed(v1alpha1.ReasonInvalidSeedSecret, "failed to parse seed: %s", err.Error()))
+		return nil, TerminalError(ConditionFailed(v1alpha1.ReasonInvalidSeedSecret, "failed to parse seed: %w", err))
+	}
+
+	pubkey, err := kp.PublicKey()
+	if err != nil {
+		// this shouldn't really happen if everything is stitched up correctly, it probably means something has
+		// been manually changed in the secret to an invalid seed.
+		return nil, TerminalError(ConditionFailed(v1alpha1.ReasonMalformedSeedSecret, "failed to get PublicKey from KeyPair: %w", err))
 	}
 
 	want, err := resources.NewKeyPairSecretBuilderFromSecret(got, r.Scheme).Build(owner, kp)
 	if err != nil {
-		logger.Error(err, "failed to build desired keypair secret")
-
-		return kp, TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, err.Error()))
+		return nil, TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to build seed secret from existing secret: %w", err))
 	}
 
 	if !equality.Semantic.DeepEqual(got, want) {
@@ -51,15 +81,50 @@ func (r *BaseReconciler) ensureSeedSecretUpToDate(ctx context.Context, owner cli
 
 		err = r.Client.Update(ctx, want)
 		if err != nil {
-			logger.Error(err, "failed to update seed secret")
-
-			return kp, ConditionFailed(v1alpha1.ReasonUnknownError, err.Error())
+			return nil, TemporaryError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to update seed secret: %w", err))
 		}
 
 		r.EventRecorder.Eventf(owner, v1.EventTypeNormal, "SeedSecretUpdated", "updated secret: %s/%s", want.Namespace, want.Name)
 	}
 
-	return kp, nil
+	return &v1alpha1.KeyPair{
+		PublicKey:      pubkey,
+		SeedSecretName: got.Name,
+	}, nil
+}
+
+func (r *BaseReconciler) createSeedSecret(ctx context.Context, obj client.Object, newKP NKeyFactory) (*v1alpha1.KeyPair, []byte, error) {
+	kp, err := newKP()
+	if err != nil {
+		return nil, nil, TemporaryError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to generate new KeyPair: %w", err))
+	}
+
+	seed, err := kp.Seed()
+	if err != nil {
+		return nil, nil, TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to get Seed from nkey.KeyPair: %w", err))
+	}
+
+	pubkey, err := kp.PublicKey()
+	if err != nil {
+		return nil, nil, TerminalError(ConditionFailed(
+			v1alpha1.ReasonMalformedSeedSecret, "failed to get PublicKey from nkey.KeyPair: %w", err))
+	}
+
+	secret, err := resources.NewKeyPairSecretBuilder(r.Scheme).Build(obj, kp)
+	if err != nil {
+		return nil, nil, TemporaryError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to build seed secret: %w", err))
+	}
+
+	if err = r.Client.Create(ctx, secret); err != nil {
+		return nil, nil, TemporaryError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to create seed secret: %w", err))
+	}
+
+	r.EventRecorder.Eventf(obj, v1.EventTypeNormal, "SeedSecretCreated", "created secret: %s/%s", secret.Namespace, secret.Name)
+
+	return &v1alpha1.KeyPair{
+		PublicKey:      pubkey,
+		SeedSecretName: secret.Name,
+	}, seed, nil
 }
 
 // resolveIssuer resolves the issuer reference to a KeyPairable object. This is abstracted to support issuers being

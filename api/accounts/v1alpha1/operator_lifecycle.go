@@ -5,7 +5,6 @@ import "github.com/versori-oss/nats-account-operator/pkg/apis"
 const (
 	OperatorConditionReady                 = apis.ConditionReady
 	OperatorConditionSystemAccountResolved = "SystemAccountResolved"
-	OperatorConditionSystemAccountReady    = "SystemAccountReady"
 	OperatorConditionSigningKeysUpdated    = "SigningKeysUpdated"
 	OperatorConditionJWTSecretReady        = "JWTSecretReady"
 	OperatorConditionSeedSecretReady       = "SeedSecretReady"
@@ -15,7 +14,6 @@ var operatorConditionSet = apis.NewLivingConditionSet(
 	OperatorConditionReady,
 	KeyPairableConditionSeedSecretReady,
 	OperatorConditionSystemAccountResolved,
-	OperatorConditionSystemAccountReady,
 	OperatorConditionSigningKeysUpdated,
 	OperatorConditionJWTSecretReady,
 	OperatorConditionSeedSecretReady,
@@ -50,28 +48,12 @@ func (os *OperatorStatus) MarkSystemAccountResolveFailed(reason, messageFormat s
 	os.ResolvedSystemAccount = nil
 
 	operatorConditionSet.Manage(os).MarkFalse(OperatorConditionSystemAccountResolved, reason, messageFormat, messageA...)
-
-	os.MarkSystemAccountUnknown(reason, messageFormat, messageA...)
 }
 
 func (os *OperatorStatus) MarkSystemAccountResolveUnknown(reason, messageFormat string, messageA ...interface{}) {
 	os.ResolvedSystemAccount = nil
 
 	operatorConditionSet.Manage(os).MarkUnknown(OperatorConditionSystemAccountResolved, reason, messageFormat, messageA...)
-
-	os.MarkSystemAccountUnknown(reason, messageFormat, messageA...)
-}
-
-func (os *OperatorStatus) MarkSystemAccountReady() {
-	operatorConditionSet.Manage(os).MarkTrue(OperatorConditionSystemAccountReady)
-}
-
-func (os *OperatorStatus) MarkSystemAccountNotReady(reason, messageFormat string, messageA ...interface{}) {
-	operatorConditionSet.Manage(os).MarkFalse(OperatorConditionSystemAccountReady, reason, messageFormat, messageA...)
-}
-
-func (os *OperatorStatus) MarkSystemAccountUnknown(reason, messageFormat string, messageA ...interface{}) {
-	operatorConditionSet.Manage(os).MarkUnknown(OperatorConditionSystemAccountReady, reason, messageFormat, messageA...)
 }
 
 func (os *OperatorStatus) MarkSigningKeysUpdated(signingKeys []SigningKeyEmbeddedStatus) {
@@ -104,11 +86,8 @@ func (os *OperatorStatus) MarkJWTSecretUnknown(reason, messageFormat string, mes
 	operatorConditionSet.Manage(os).MarkUnknown(OperatorConditionJWTSecretReady, reason, messageFormat, messageA...)
 }
 
-func (os *OperatorStatus) MarkSeedSecretReady(publicKey, seedSecretName string) {
-	os.KeyPair = &KeyPair{
-		PublicKey:      publicKey,
-		SeedSecretName: seedSecretName,
-	}
+func (os *OperatorStatus) MarkSeedSecretReady(kp KeyPair) {
+	os.KeyPair = &kp
 
 	operatorConditionSet.Manage(os).MarkTrue(OperatorConditionSeedSecretReady)
 }

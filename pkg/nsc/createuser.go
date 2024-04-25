@@ -72,7 +72,7 @@ func CreateUserClaims(
 
 	ujwt, err = claims.Encode(signingKey)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to encode account claims: %w", err)
+		return nil, "", fmt.Errorf("failed to encode user claims: %w", err)
 	}
 
 	return claims, ujwt, nil

@@ -38,10 +38,6 @@ const (
 
 // SigningKeySpec defines the desired state of SigningKey
 type SigningKeySpec struct {
-	// Type defines which prefix to use for the signing key, supported values are "Operator" and "Account".
-	// +required
-	Type SigningKeyType `json:"type"`
-
 	// SeedSecretName is the name of the secret containing the seed for this signing key.
 	// +required
 	SeedSecretName string `json:"seedSecretName"`

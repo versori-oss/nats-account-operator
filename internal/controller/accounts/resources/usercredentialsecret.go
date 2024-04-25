@@ -1,6 +1,8 @@
 package resources
 
 import (
+	"fmt"
+
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 	corev1 "k8s.io/api/core/v1"
@@ -55,7 +57,8 @@ func (b *UserCredentialSecretBuilder) Build(usr *v1alpha1.User, ujwt string, see
 	}
 
 	b.secret.Name = usr.Spec.CredentialsSecretName
-	b.secret.Labels[LabelJWTSubject] = pubkey
+	b.secret.Labels[LabelSubject] = pubkey
+	b.secret.Annotations[AnnotationSecretType] = AnnotationSecretTypeCredentials
 	b.secret.Annotations[AnnotationSecretJWTType] = AnnotationSecretTypeUser
 	b.secret.Namespace = usr.GetNamespace()
 	b.secret.Data = map[string][]byte{
@@ -63,8 +66,8 @@ func (b *UserCredentialSecretBuilder) Build(usr *v1alpha1.User, ujwt string, see
 		v1alpha1.NatsCAKey:          b.ca,
 	}
 
-	if err = controllerutil.SetControllerReference(usr, b.secret, b.scheme); err != nil {
-		return nil, err
+	if err := controllerutil.SetControllerReference(usr, b.secret, b.scheme); err != nil {
+		return nil, fmt.Errorf("failed to set owner reference: %w", err)
 	}
 
 	return b.secret, nil
