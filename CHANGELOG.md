@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/versori-oss/nats-account-operator/compare/v0.2.5...v0.3.0) (2024-04-25)
+
+
+### Features
+
+* upgrade kubebuilder and k8s.io APIs ([227e509](https://github.com/versori-oss/nats-account-operator/commit/227e509ce6d7b2108bad8c784c77e3e64172fab0))
+
+
+### Bug Fixes
+
+* all sorts of refactoring and bug fixing ([baca523](https://github.com/versori-oss/nats-account-operator/commit/baca523d2299d86e84da6c5987445831d2e1c68a))
+* more refactorings ([e24ab49](https://github.com/versori-oss/nats-account-operator/commit/e24ab49cf503dd91205ccbd6a04d060cdab76956))
+* **user:** correctly configure the issuer_account claim when users are signed by a signing key ([9295b83](https://github.com/versori-oss/nats-account-operator/commit/9295b8372cd33558f6df3e95ff5450ac371dce52))
+
 ## [0.2.5](https://github.com/versori-oss/nats-account-operator/compare/v0.2.4...v0.2.5) (2024-01-16)
 
 
