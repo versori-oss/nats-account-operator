@@ -37,28 +37,24 @@ func (b *JWTSecretBuilder) Build(obj client.Object, jwt string, opts ...SecretOp
 		}
 	}
 
-	if b.secret.Annotations == nil {
-		b.secret.Annotations = make(map[string]string)
-	}
-
 	if b.secret.Labels == nil {
 		b.secret.Labels = make(map[string]string)
 	}
 
-	b.secret.Annotations[AnnotationSecretType] = AnnotationSecretTypeJWT
+	b.secret.Labels[LabelSecretType] = LabelSecretTypeJWT
 
 	switch v := obj.(type) {
 	case *v1alpha1.Operator:
 		b.secret.Name = v.Spec.JWTSecretName
-		b.secret.Annotations[AnnotationSecretJWTType] = AnnotationSecretTypeOperator
+		b.secret.Labels[LabelSecretJWTType] = LabelSecretTypeOperator
 		b.secret.Labels[LabelOperatorName] = v.Name
 	case *v1alpha1.Account:
 		b.secret.Name = v.Spec.JWTSecretName
-		b.secret.Annotations[AnnotationSecretJWTType] = AnnotationSecretTypeAccount
+		b.secret.Labels[LabelSecretJWTType] = LabelSecretTypeAccount
 		b.secret.Labels[LabelAccountName] = v.Name
 	case *v1alpha1.User:
 		b.secret.Name = v.Spec.JWTSecretName
-		b.secret.Annotations[AnnotationSecretJWTType] = AnnotationSecretTypeUser
+		b.secret.Labels[LabelSecretJWTType] = LabelSecretTypeUser
 		b.secret.Labels[LabelUserName] = v.Name
 	default:
 		return nil, fmt.Errorf("unknown object type for JWT secret owner: %T", obj)

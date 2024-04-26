@@ -48,18 +48,14 @@ func (b *UserCredentialSecretBuilder) Build(usr *v1alpha1.User, ujwt string, see
 		pubkey, _ = kp.PublicKey()
 	}
 
-	if b.secret.Annotations == nil {
-		b.secret.Annotations = make(map[string]string)
-	}
-
 	if b.secret.Labels == nil {
 		b.secret.Labels = make(map[string]string)
 	}
 
 	b.secret.Name = usr.Spec.CredentialsSecretName
 	b.secret.Labels[LabelSubject] = pubkey
-	b.secret.Annotations[AnnotationSecretType] = AnnotationSecretTypeCredentials
-	b.secret.Annotations[AnnotationSecretJWTType] = AnnotationSecretTypeUser
+	b.secret.Labels[LabelSecretType] = LabelSecretTypeCredentials
+	b.secret.Labels[LabelSecretJWTType] = LabelSecretTypeUser
 	b.secret.Namespace = usr.GetNamespace()
 	b.secret.Data = map[string][]byte{
 		v1alpha1.NatsSecretCredsKey: creds,
