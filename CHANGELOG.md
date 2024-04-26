@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/versori-oss/nats-account-operator/compare/v0.4.0...v0.4.1) (2024-04-26)
+
+
+### Bug Fixes
+
+* add get,list,watch namespace permissions to controller-manager ([c82d0b4](https://github.com/versori-oss/nats-account-operator/commit/c82d0b4ef7db551556a6486b27266e88e5cf04d8))
+
 ## [0.4.0](https://github.com/versori-oss/nats-account-operator/compare/v0.3.0...v0.4.0) (2024-04-26)
 
 
