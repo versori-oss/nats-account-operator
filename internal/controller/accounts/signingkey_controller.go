@@ -329,7 +329,6 @@ func (r *SigningKeyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-
 // signingKeyOperatorWatcher will enqueue any SigningKeys which are managed by the Operator being
 // watched.
 // Similar to accountOperatorWatcher, this will almost always be every SigningKey in the cluster

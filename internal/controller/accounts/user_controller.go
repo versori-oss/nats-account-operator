@@ -164,7 +164,6 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 	return result, nil
 }
 
-
 func (r *UserReconciler) validateAccountSelector(ctx context.Context, account *v1alpha1.Account, user *v1alpha1.User) error {
 	ns, err := r.CoreV1.Namespaces().Get(ctx, user.Namespace, metav1.GetOptions{})
 	if err != nil {

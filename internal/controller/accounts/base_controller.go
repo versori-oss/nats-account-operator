@@ -237,7 +237,7 @@ func (r *BaseReconciler) resolveIssuer(ctx context.Context, issuer v1alpha1.Issu
 		)
 
 		return nil, TerminalError(ConditionFailed(
-			v1alpha1.ReasonUnsupportedIssuer, "runtime.Object cannot be converted to client.Object", issuerGVK.String()))
+			v1alpha1.ReasonUnsupportedIssuer, "runtime.Object cannot be converted to client.Object: %s", issuerGVK.String()))
 	}
 
 	// .issuer.ref.namespace is optional, so default to the Account's namespace if not set
@@ -307,7 +307,7 @@ func (r *BaseReconciler) resolveSigningKeyOwner(ctx context.Context, sk *v1alpha
 		)
 
 		return nil, TemporaryError(ConditionFailed(
-			v1alpha1.ReasonInvalidSigningKeyOwner, "runtime.Object cannot be converted to client.Object", gvk.String()))
+			v1alpha1.ReasonInvalidSigningKeyOwner, "runtime.Object cannot be converted to client.Object: %s", gvk.String()))
 	}
 
 	err = r.Client.Get(ctx, client.ObjectKey{

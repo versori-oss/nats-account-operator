@@ -1,18 +1,18 @@
 package resources
 
 const (
-	LabelSecretType         = "nats.accounts.io/secret-type"
-	LabelSecretTypeSeed             = "seed"
+	LabelSecretType            = "nats.accounts.io/secret-type"
+	LabelSecretTypeSeed        = "seed"
 	LabelSecretTypeJWT         = "jwt"
 	LabelSecretTypeCredentials = "credentials"
 
 	LabelSecretJWTType  = "nats.accounts.io/jwt-type"
 	LabelSecretSeedType = "nats.accounts.io/seed-type"
 
-	LabelSecretTypeOperator     = "Operator"
+	LabelSecretTypeOperator   = "Operator"
 	LabelSecretTypeSigningKey = "SigningKey"
-	LabelSecretTypeAccount = "Account"
-	LabelSecretTypeUser    = "User"
+	LabelSecretTypeAccount    = "Account"
+	LabelSecretTypeUser       = "User"
 
 	LabelSubject = "accounts.nats.io/subject"
 
