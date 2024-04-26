@@ -246,3 +246,11 @@ GOBIN=$(LOCALBIN) go install $${package} ;\
 mv "$$(echo "$(1)" | sed "s/-$(3)$$//")" $(1) ;\
 }
 endef
+
+.PHONY: prepare-release
+prepare-release:
+	npx release-please release-pr --release-type go --repo-url versori-oss/nats-account-operator --token=$(GITHUB_TOKEN)
+
+.PHONY: release
+release:
+	npx release-please github-release --release-type go --repo-url versori-oss/nats-account-operator --token=$(GITHUB_TOKEN)
