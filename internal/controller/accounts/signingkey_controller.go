@@ -30,8 +30,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -47,6 +51,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/internal/controller/accounts/resources"
 	accountsclientsets "github.com/versori-oss/nats-account-operator/pkg/generated/clientset/versioned/typed/accounts/v1alpha1"
 )
 
@@ -74,14 +79,7 @@ func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	signingKey := new(v1alpha1.SigningKey)
 	if err := r.Get(ctx, req.NamespacedName, signingKey); err != nil {
-		if errors.IsNotFound(err) {
-			logger.V(1).Info("signing key not found or not ready")
-			return ctrl.Result{
-				RequeueAfter: 30 * time.Second,
-			}, nil
-		}
-		logger.Error(err, "failed to fetch signing key")
-		return ctrl.Result{}, err
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	originalStatus := signingKey.Status.DeepCopy()
@@ -91,30 +89,37 @@ func (r *SigningKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	defer func() {
 		if !equality.Semantic.DeepEqual(*originalStatus, signingKey.Status) {
 			if err2 := r.Status().Update(ctx, signingKey); err2 != nil {
-				logger.Error(err2, "failed to update signing key status")
+				if errors.IsConflict(err2) && err == nil {
+					result = ctrl.Result{RequeueAfter: time.Second}
 
-				err = multierr.Append(err, err2)
+					return
+				}
+
+				err = multierr.Append(err, fmt.Errorf("failed to update signing key status: %w", err2))
 			}
 		}
 	}()
 
 	if err := r.ensureOwnerResolved(ctx, signingKey); err != nil {
-		logger.V(1).Info("failed to resolve owner for signing key", "name", signingKey.Name)
-		signingKey.Status.MarkOwnerResolveFailed("failed to resolve owner", "%s:%s", signingKey.Spec.OwnerRef.Name, signingKey.Spec.OwnerRef.Kind)
+		signingKey.Status.MarkOwnerResolveFailed(v1alpha1.ReasonUnknownError, "failed to resolve owner: %s", err.Error())
 
-		return ctrl.Result{}, err
+		return AsResult(err)
 	}
 
-	if err := r.ensureKeyPair(ctx, signingKey); err != nil {
-		logger.Error(err, "failed to ensure key pair")
-
-		return ctrl.Result{}, err
+	result, err = r.reconcileLabels(ctx, signingKey)
+	if !result.IsZero() || err != nil {
+		return result, err
 	}
 
-	return ctrl.Result{}, nil
+	result, err = r.ensureKeyPair(ctx, signingKey)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to ensure key pair: %w", err)
+	}
+
+	return result, nil
 }
 
-func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *v1alpha1.SigningKey) error {
+func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *v1alpha1.SigningKey) (reconcile.Result, error) {
 	logger := log.FromContext(ctx)
 
 	var publicKey string
@@ -128,22 +133,22 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *v1
 			keyPair, err = nkeys.CreateOperator()
 		default:
 			err := errors.NewBadRequest(fmt.Sprintf("unknown owner kind: %s", signingKey.Spec.OwnerRef.Kind))
-			return err
+			return reconcile.Result{}, err
 		}
 		if err != nil {
 			logger.Error(err, "failed to create key pair")
-			return err
+			return reconcile.Result{}, err
 		}
 
 		seed, err := keyPair.Seed()
 		if err != nil {
 			logger.Error(err, "failed to get seed")
-			return err
+			return reconcile.Result{}, err
 		}
 		publicKey, err = keyPair.PublicKey()
 		if err != nil {
 			logger.Error(err, "failed to get public key")
-			return err
+			return reconcile.Result{}, err
 		}
 
 		data := map[string][]byte{
@@ -160,24 +165,28 @@ func (r *SigningKeyReconciler) ensureKeyPair(ctx context.Context, signingKey *v1
 
 		if err = ctrl.SetControllerReference(signingKey, &secret, r.Scheme); err != nil {
 			logger.Error(err, "failed to set controller reference")
-			return err
+			return reconcile.Result{}, err
 		}
 
 		_, err = r.CoreV1.Secrets(signingKey.Namespace).Create(ctx, &secret, metav1.CreateOptions{})
 		if err != nil {
 			logger.Error(err, "failed to create seed secret")
-			return err
+			return reconcile.Result{}, err
 		}
+
+		signingKey.Status.MarkSeedSecretReady(publicKey, signingKey.Spec.SeedSecretName)
+
+		return reconcile.Result{Requeue: true}, nil
 	} else if err != nil {
 		logger.Error(err, "failed to fetch seed secret")
-		return err
+		return reconcile.Result{}, err
 	} else {
 		publicKey = string(secret.Data[v1alpha1.NatsSecretPublicKeyKey])
 	}
 
 	signingKey.Status.MarkSeedSecretReady(publicKey, signingKey.Spec.SeedSecretName)
 
-	return nil
+	return reconcile.Result{}, nil
 }
 
 func (r *SigningKeyReconciler) ensureOwnerResolved(ctx context.Context, signingKey *v1alpha1.SigningKey) error {
@@ -216,6 +225,12 @@ func (r *SigningKeyReconciler) ensureOwnerResolved(ctx context.Context, signingK
 		return err
 	}
 
+	if err := r.validateOwnerRequirements(ownerObj, signingKey); err != nil {
+		signingKey.Status.MarkOwnerResolveFailed(v1alpha1.ReasonNotAllowed, "SigningKey does not match selector requirements: %w", err)
+
+		return TerminalError(err)
+	}
+
 	ownerAPIVersion, ownerKind := ownerObj.GetObjectKind().GroupVersionKind().ToAPIVersionAndKind()
 	signingKey.Status.MarkOwnerResolved(v1alpha1.TypedObjectReference{
 		APIVersion: ownerAPIVersion,
@@ -228,10 +243,162 @@ func (r *SigningKeyReconciler) ensureOwnerResolved(ctx context.Context, signingK
 	return nil
 }
 
+func (r *SigningKeyReconciler) validateOwnerRequirements(owner client.Object, signingKey *v1alpha1.SigningKey) error {
+	if owner.GetNamespace() != signingKey.GetNamespace() {
+		return fmt.Errorf("owner namespace %q does not match signing key namespace %q", owner.GetNamespace(), signingKey.GetNamespace())
+	}
+
+	var labelSelector *metav1.LabelSelector
+
+	switch owner := owner.(type) {
+	case *v1alpha1.Operator:
+		labelSelector = owner.Spec.SigningKeysSelector
+	case *v1alpha1.Account:
+		labelSelector = owner.Spec.SigningKeysSelector
+	default:
+		return fmt.Errorf("unsupported owner kind evaluating owner requirements: %T", owner)
+	}
+
+	if labelSelector == nil {
+		return nil
+	}
+
+	s, err := metav1.LabelSelectorAsSelector(labelSelector)
+	if err != nil {
+		return fmt.Errorf("failed to parse signing key label selector: %w", err)
+	}
+
+	if !s.Matches(labels.Set(signingKey.GetLabels())) {
+		return fmt.Errorf("signing key does not match selector requirements")
+	}
+
+	return nil
+}
+
+func (r *SigningKeyReconciler) reconcileLabels(ctx context.Context, signingKey *v1alpha1.SigningKey) (reconcile.Result, error) {
+	logger := log.FromContext(ctx)
+
+	if signingKey.Status.OwnerRef == nil {
+		return reconcile.Result{}, nil
+	}
+
+	if signingKey.Labels == nil {
+		signingKey.Labels = make(map[string]string)
+	}
+
+	var needsUpdate bool
+
+	switch signingKey.Status.OwnerRef.Kind {
+	case "Operator":
+		if signingKey.Labels[resources.LabelOperatorName] != signingKey.Status.OwnerRef.Name {
+			signingKey.Labels[resources.LabelOperatorName] = signingKey.Status.OwnerRef.Name
+			needsUpdate = true
+		}
+	case "Account":
+		if signingKey.Labels[resources.LabelAccountName] != signingKey.Status.OwnerRef.Name {
+			signingKey.Labels[resources.LabelAccountName] = signingKey.Status.OwnerRef.Name
+			needsUpdate = true
+		}
+	default:
+		logger.Error(
+			fmt.Errorf("unsupported owner kind"),
+			"expected Operator or Account kind for SigningKey owner",
+			"kind", signingKey.Status.OwnerRef.Kind)
+	}
+
+	if !needsUpdate {
+		return reconcile.Result{}, nil
+	}
+
+	if err := r.Client.Update(ctx, signingKey); err != nil {
+		logger.Error(err, "failed to update signing key labels")
+
+		return reconcile.Result{}, err
+	}
+
+	return reconcile.Result{Requeue: true}, nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *SigningKeyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.SigningKey{}).
 		Owns(&v1.Secret{}).
+		Watches(&v1alpha1.Operator{}, signingKeyOperatorWatcher(mgr.GetLogger(), mgr.GetClient())).
+		Watches(&v1alpha1.Account{}, signingKeyAccountWatcher(mgr.GetLogger(), mgr.GetClient())).
 		Complete(r)
+}
+
+// signingKeyOperatorWatcher will enqueue any SigningKeys which are managed by the Operator being
+// watched.
+// Similar to accountOperatorWatcher, this will almost always be every SigningKey in the cluster
+// unless the environment contains multiple Operators.
+func signingKeyOperatorWatcher(logger logr.Logger, c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		operator, ok := obj.(*v1alpha1.Operator)
+		if !ok {
+			logger.Info("Operator watcher received non-Operator object",
+				"kind", obj.GetObjectKind().GroupVersionKind().String())
+			return nil
+		}
+
+		var signingKeyList v1alpha1.SigningKeyList
+
+		if err := c.List(ctx, &signingKeyList, client.InNamespace(operator.Namespace), client.MatchingLabels{
+			resources.LabelOperatorName: operator.Name,
+		}); err != nil {
+			logger.Error(err, "failed to list accounts for operator during enqueue handler", "operator", operator.Name)
+
+			return nil
+		}
+
+		requests := make([]reconcile.Request, len(signingKeyList.Items))
+
+		for i, acc := range signingKeyList.Items {
+			requests[i] = reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      acc.Name,
+					Namespace: acc.Namespace,
+				},
+			}
+		}
+
+		return requests
+	})
+}
+
+// signingKeyAccountWatcher will enqueue any SigningKeys which are managed by the Account being
+// watched.
+func signingKeyAccountWatcher(logger logr.Logger, c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		account, ok := obj.(*v1alpha1.Account)
+		if !ok {
+			logger.Info("Account watcher received non-Account object",
+				"kind", obj.GetObjectKind().GroupVersionKind().String())
+			return nil
+		}
+
+		var signingKeyList v1alpha1.SigningKeyList
+
+		if err := c.List(ctx, &signingKeyList, client.InNamespace(account.Namespace), client.MatchingLabels{
+			resources.LabelAccountName: account.Name,
+		}); err != nil {
+			logger.Error(err, "failed to list signing keys for account during enqueue handler", "account", account.Name)
+
+			return nil
+		}
+
+		requests := make([]reconcile.Request, len(signingKeyList.Items))
+
+		for i, acc := range signingKeyList.Items {
+			requests[i] = reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      acc.Name,
+					Namespace: acc.Namespace,
+				},
+			}
+		}
+
+		return requests
+	})
 }

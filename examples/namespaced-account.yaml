@@ -1,0 +1,213 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foo
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bar
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: baz
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: Account
+metadata:
+  name: protected
+  namespace: foo
+spec:
+  seedSecretName: nats-account-protected-seed
+  jwtSecretName: nats-account-protected-jwt
+  limits:
+    jetStream:
+      memoryStorage: -1 # Unlimited
+      diskStorage: 10737418240 # 10Gi
+  usersNamespaceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - foo
+          - bar
+  usersSelector:
+    matchLabels:
+      protected: "true"
+  signingKeysSelector:
+    matchLabels:
+      protected: "true"
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: Operator
+      name: operator
+      namespace: nats-io
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: User
+metadata:
+  name: protected-foo
+  namespace: foo
+  labels:
+    protected: "true"
+spec:
+  credentialsSecretName: nats-user-protected-foo-creds
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: Account
+      name: protected
+      namespace: foo
+  jwtSecretName: nats-user-protected-foo-jwt
+  seedSecretName: nats-user-protected-foo-seed
+---
+# should fail because it has no label
+apiVersion: accounts.nats.io/v1alpha1
+kind: User
+metadata:
+  name: not-protected-foo
+  namespace: foo
+spec:
+  credentialsSecretName: nats-user-not-protected-foo-creds
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: Account
+      name: not-protected
+      namespace: foo
+  jwtSecretName: nats-user-not-protected-foo-jwt
+  seedSecretName: nats-user-not-protected-foo-seed
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: User
+metadata:
+  name: protected-bar
+  namespace: bar
+  labels:
+    protected: "true"
+spec:
+  credentialsSecretName: nats-user-protected-bar-creds
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: Account
+      name: protected
+      namespace: foo
+  jwtSecretName: nats-user-protected-bar-jwt
+  seedSecretName: nats-user-protected-bar-seed
+---
+# should fail because it has no label
+apiVersion: accounts.nats.io/v1alpha1
+kind: User
+metadata:
+  name: not-protected-bar
+  namespace: bar
+spec:
+  credentialsSecretName: nats-user-not-protected-bar-creds
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: Account
+      name: not-protected
+      namespace: foo
+  jwtSecretName: nats-user-not-protected-bar-jwt
+  seedSecretName: nats-user-not-protected-bar-seed
+---
+# should fail because it's not in a selected namespace
+apiVersion: accounts.nats.io/v1alpha1
+kind: User
+metadata:
+  name: not-protected-baz
+  namespace: baz
+  labels:
+    protected: "true"
+spec:
+  credentialsSecretName: nats-user-not-protected-baz-creds
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: Account
+      name: protected
+      namespace: foo
+  jwtSecretName: nats-user-not-protected-baz-jwt
+  seedSecretName: nats-user-not-protected-baz-seed
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: SigningKey
+metadata:
+  name: protected
+  namespace: foo
+  labels:
+    protected: "true"
+spec:
+  ownerRef:
+    apiVersion: accounts.nats.io/v1alpha1
+    kind: Account
+    name: protected
+  seedSecretName: nats-protected-signingkey-protected-seed
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: SigningKey
+metadata:
+  name: not-protected
+  namespace: foo
+spec:
+  ownerRef:
+    apiVersion: accounts.nats.io/v1alpha1
+    kind: Account
+    name: protected
+  seedSecretName: nats-not-protected-signingkey-protected-seed
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: User
+metadata:
+  name: protected-sk-bar
+  namespace: bar
+  labels:
+    protected: "true"
+spec:
+  credentialsSecretName: nats-user-protected-sk-bar-creds
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: SigningKey
+      name: protected
+      namespace: foo
+  jwtSecretName: nats-user-protected-sk-bar-jwt
+  seedSecretName: nats-user-protected-sk-bar-seed
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: User
+metadata:
+  name: not-protected-sk-bar
+  namespace: bar
+spec:
+  credentialsSecretName: nats-user-not-protected-sk-bar-creds
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: SigningKey
+      name: protected
+      namespace: foo
+  jwtSecretName: nats-user-not-protected-sk-bar-jwt
+  seedSecretName: nats-user-not-protected-sk-bar-seed
+---
+apiVersion: accounts.nats.io/v1alpha1
+kind: User
+metadata:
+  name: not-protected-sk-baz
+  namespace: baz
+  labels:
+    protected: "true"
+spec:
+  credentialsSecretName: nats-user-not-protected-sk-baz-creds
+  issuer:
+    ref:
+      apiVersion: accounts.nats.io/v1alpha1
+      kind: SigningKey
+      name: protected
+      namespace: foo
+  jwtSecretName: nats-user-not-protected-sk-baz-jwt
+  seedSecretName: nats-user-not-protected-sk-baz-seed

@@ -40,16 +40,14 @@ func MarkCondition(err error, failure, unknown markConditionFunc) {
 type conditionError struct {
 	failure bool
 	reason  string
-	msgFmt  string
-	args    []any
+	err     error
 }
 
 func ConditionFailed(reason, msgFmt string, args ...any) error {
 	return &conditionError{
 		failure: true,
 		reason:  reason,
-		msgFmt:  msgFmt,
-		args:    args,
+		err:     fmt.Errorf(msgFmt, args...),
 	}
 }
 
@@ -57,28 +55,27 @@ func ConditionUnknown(reason, msgFmt string, args ...any) error {
 	return &conditionError{
 		failure: false,
 		reason:  reason,
-		msgFmt:  msgFmt,
-		args:    args,
+		err:     fmt.Errorf(msgFmt, args...),
 	}
 }
 
 func (c *conditionError) Error() string {
 	// use Errorf to allow msgFmt to contain %w for wrapping other errors.
-	return fmt.Errorf(c.msgFmt, c.args...).Error()
+	return c.err.Error()
 }
 
 func (c *conditionError) MarkCondition(failure, unknown markConditionFunc) {
 	if c.failure {
-		failure(c.reason, c.msgFmt, c.args...)
+		failure(c.reason, c.Error())
 	} else {
-		unknown(c.reason, c.msgFmt, c.args...)
+		unknown(c.reason, c.Error())
 	}
 }
 
 // Unwrap returns the underlying error.
 func (c *conditionError) Unwrap() error {
 	// use Errorf to allow msgFmt to contain %w for wrapping other errors.
-	return fmt.Errorf(c.msgFmt, c.args...)
+	return c.err
 }
 
 // resultError is used to terminate reconciliation and control whether the request should be re-enqueued. This error

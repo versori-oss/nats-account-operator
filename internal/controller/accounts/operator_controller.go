@@ -27,6 +27,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/nats-io/jwt/v2"
@@ -69,14 +70,7 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 
 	operator := new(v1alpha1.Operator)
 	if err := r.Get(ctx, req.NamespacedName, operator); err != nil {
-		if errors.IsNotFound(err) {
-			logger.V(1).Info("operator deleted")
-			return ctrl.Result{}, nil
-		}
-
-		logger.Error(err, "failed to Get operator object")
-
-		return ctrl.Result{}, err
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	originalStatus := operator.Status.DeepCopy()
@@ -86,14 +80,19 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 	defer func() {
 		if !equality.Semantic.DeepEqual(*originalStatus, operator.Status) {
 			if err2 := r.Status().Update(ctx, operator); err2 != nil {
-				logger.Info("failed to update operator status", "error", err2.Error())
+				if errors.IsConflict(err2) && err == nil {
+					result = ctrl.Result{RequeueAfter: time.Second}
 
-				err = multierr.Append(err, err2)
+					return
+				}
+
+				err = multierr.Append(err, fmt.Errorf("failed to update operator status: %w", err2))
 			}
 		}
 	}()
 
-	kp, seed, err := r.reconcileSeedSecret(ctx, operator, nkeys.CreateOperator, operator.Spec.SeedSecretName, resources.Immutable())
+	kp, seed, result, err := r.reconcileSeedSecret(ctx, operator, nkeys.CreateOperator, operator.Spec.SeedSecretName,
+		resources.Immutable(), resources.WithDeletionPrevention())
 	if err != nil {
 		MarkCondition(err, operator.Status.MarkSeedSecretFailed, operator.Status.MarkSeedSecretUnknown)
 
@@ -101,6 +100,10 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 	}
 
 	operator.Status.MarkSeedSecretReady(*kp)
+
+	if !result.IsZero() {
+		return result, nil
+	}
 
 	if err = r.ensureSystemAccountResolved(ctx, operator); err != nil {
 		logger.Error(err, "failed to resolve system account")
@@ -123,7 +126,7 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 		return ctrl.Result{}, err
 	}
 
-	err = r.reconcileJWTSecret(ctx, operator, seed)
+	result, err = r.reconcileJWTSecret(ctx, operator, seed)
 	if err != nil {
 		MarkCondition(err, operator.Status.MarkJWTSecretFailed, operator.Status.MarkJWTSecretUnknown)
 
@@ -132,16 +135,15 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 
 	operator.Status.MarkJWTSecretReady()
 
-
-	return ctrl.Result{}, nil
+	return result, nil
 }
 
-func (r *OperatorReconciler) reconcileJWTSecret(ctx context.Context, operator *v1alpha1.Operator, seed []byte) error {
+func (r *OperatorReconciler) reconcileJWTSecret(ctx context.Context, operator *v1alpha1.Operator, seed []byte) (reconcile.Result, error) {
 	logger := log.FromContext(ctx)
 
 	signingKey, err := nkeys.FromSeed(seed)
 	if err != nil {
-		return TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to get signing key from seed: %w", err))
+		return reconcile.Result{}, TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to get signing key from seed: %w", err))
 	}
 
 	// we want to check that any existing secret decodes to match wantClaims, if it doesn't then we will use nextJWT
@@ -149,7 +151,7 @@ func (r *OperatorReconciler) reconcileJWTSecret(ctx context.Context, operator *v
 	// timestamped with the `iat` claim so will never match.
 	wantClaims, nextJWT, err := nsc.CreateOperatorClaims(operator, signingKey)
 	if err != nil {
-		return TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to create account JWT claims: %w", err))
+		return reconcile.Result{}, TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to create account JWT claims: %w", err))
 	}
 
 	got, err := r.CoreV1.Secrets(operator.Namespace).Get(ctx, operator.Spec.JWTSecretName, metav1.GetOptions{})
@@ -157,15 +159,15 @@ func (r *OperatorReconciler) reconcileJWTSecret(ctx context.Context, operator *v
 		if errors.IsNotFound(err) {
 			logger.V(1).Info("JWT secret not found, creating new secret")
 
-			return r.createJWTSecret(ctx, operator, nextJWT)
+			return reconcile.Result{Requeue: true}, r.createJWTSecret(ctx, operator, nextJWT)
 		}
 
-		return TemporaryError(ConditionUnknown(v1alpha1.ReasonUnknownError, "failed to get JWT secret: %w", err))
+		return reconcile.Result{}, TemporaryError(ConditionUnknown(v1alpha1.ReasonUnknownError, "failed to get JWT secret: %w", err))
 	}
 
-	_, err = r.ensureJWTSecretUpToDate(ctx, operator, wantClaims, got, nextJWT)
+	_, result, err := r.ensureJWTSecretUpToDate(ctx, operator, wantClaims, got, nextJWT)
 
-	return err
+	return result, err
 }
 
 func (r *OperatorReconciler) ensureSigningKeysUpdated(ctx context.Context, operator *v1alpha1.Operator) error {

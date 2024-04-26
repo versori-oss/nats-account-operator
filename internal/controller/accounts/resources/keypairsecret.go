@@ -48,33 +48,29 @@ func (b *KeyPairSecretBuilder) Build(obj client.Object, kp nkeys.KeyPair, opts .
 		return nil, err
 	}
 
-	if b.secret.Annotations == nil {
-		b.secret.Annotations = make(map[string]string)
-	}
-
 	if b.secret.Labels == nil {
 		b.secret.Labels = make(map[string]string)
 	}
 
-	b.secret.Annotations[AnnotationSecretType] = AnnotationSecretTypeSeed
+	b.secret.Labels[LabelSecretType] = LabelSecretTypeSeed
 	b.secret.Labels[LabelSubject] = pubkey
 
 	switch v := obj.(type) {
 	case *v1alpha1.Operator:
 		b.secret.Name = v.Spec.SeedSecretName
-		b.secret.Annotations[AnnotationSecretSeedType] = AnnotationSecretTypeOperator
+		b.secret.Labels[LabelSecretSeedType] = LabelSecretTypeOperator
 		b.secret.Labels[LabelOperatorName] = v.Name
 	case *v1alpha1.SigningKey:
 		b.secret.Name = v.Spec.SeedSecretName
-		b.secret.Annotations[AnnotationSecretSeedType] = AnnotationSecretTypeSigningKey
+		b.secret.Labels[LabelSecretSeedType] = LabelSecretTypeSigningKey
 		b.secret.Labels[LabelSigningKeyName] = v.Name
 	case *v1alpha1.Account:
 		b.secret.Name = v.Spec.SeedSecretName
-		b.secret.Annotations[AnnotationSecretSeedType] = AnnotationSecretTypeAccount
+		b.secret.Labels[LabelSecretSeedType] = LabelSecretTypeAccount
 		b.secret.Labels[LabelAccountName] = v.Name
 	case *v1alpha1.User:
 		b.secret.Name = v.Spec.SeedSecretName
-		b.secret.Annotations[AnnotationSecretSeedType] = AnnotationSecretTypeUser
+		b.secret.Labels[LabelSecretSeedType] = LabelSecretTypeUser
 		b.secret.Labels[LabelUserName] = v.Name
 	default:
 		return nil, fmt.Errorf("unknown object type for JWT secret owner: %T", obj)
