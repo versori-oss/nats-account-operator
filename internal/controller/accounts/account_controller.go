@@ -28,7 +28,9 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 	"go.uber.org/multierr"
@@ -46,6 +48,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/versori-oss/nats-account-operator/api/accounts/v1alpha1"
+	"github.com/versori-oss/nats-account-operator/internal/controller/accounts/resources"
 	"github.com/versori-oss/nats-account-operator/pkg/helpers"
 	"github.com/versori-oss/nats-account-operator/pkg/nsc"
 )
@@ -71,17 +74,10 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	logger := log.FromContext(ctx)
 
 	logger.V(1).Info("reconciling account", "account", req.Name)
+
 	acc := new(v1alpha1.Account)
 	if err := r.Client.Get(ctx, req.NamespacedName, acc); err != nil {
-		if errors.IsNotFound(err) {
-			logger.Info("account deleted")
-
-			return ctrl.Result{}, nil
-		}
-
-		logger.Error(err, "failed to get account")
-
-		return ctrl.Result{}, err
+		return result, client.IgnoreNotFound(err)
 	}
 
 	originalStatus := acc.Status.DeepCopy()
@@ -91,7 +87,11 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	defer func() {
 		if !equality.Semantic.DeepEqual(*originalStatus, acc.Status) {
 			if err2 := r.Status().Update(ctx, acc); err2 != nil {
-				logger.Info("failed to update account status", "error", err2.Error(), "account_name", acc.Name, "account_namespace", acc.Namespace)
+				if errors.IsConflict(err2) && err == nil {
+					result = ctrl.Result{RequeueAfter: time.Second}
+
+					return
+				}
 
 				err = multierr.Append(err, err2)
 			}
@@ -104,10 +104,14 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 			if err := r.Update(ctx, acc); err != nil {
 				return ctrl.Result{}, err
 			}
+
+			return ctrl.Result{Requeue: true}, nil
 		}
 	} else {
 		if controllerutil.ContainsFinalizer(acc, AccountFinalizer) {
 			if err := r.finalizeAccount(ctx, acc); err != nil {
+				r.EventRecorder.Event(acc, v1.EventTypeWarning, "FinalizeFailed", err.Error())
+
 				return ctrl.Result{}, err
 			}
 
@@ -117,12 +121,15 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 			if err := r.Update(ctx, acc); err != nil {
 				return ctrl.Result{}, err
 			}
+
+			return ctrl.Result{Requeue: true}, nil
 		}
 
 		return ctrl.Result{}, nil
 	}
 
-	kp, _, err := r.reconcileSeedSecret(ctx, acc, nkeys.CreateAccount, acc.Spec.SeedSecretName)
+	kp, _, result, err := r.reconcileSeedSecret(ctx, acc, nkeys.CreateAccount, acc.Spec.SeedSecretName,
+		resources.Immutable(), resources.WithDeletionPrevention())
 	if err != nil {
 		logger.Error(err, "failed to reconcile seed secret")
 
@@ -132,6 +139,10 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	}
 
 	acc.Status.MarkSeedSecretReady(*kp)
+
+	if !result.IsZero() {
+		return result, nil
+	}
 
 	// get the KeyPairable which will be used to sign the Account JWT
 	keyPairable, err := r.resolveIssuer(ctx, acc.Spec.Issuer, acc.Namespace)
@@ -144,6 +155,22 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	operator, err := r.resolveOperator(ctx, acc, keyPairable)
 	if err != nil {
 		return AsResult(err)
+	}
+
+	if err := r.validateOperatorSelector(ctx, operator, acc); err != nil {
+		MarkCondition(err, acc.Status.MarkOperatorResolveFailed, acc.Status.MarkOperatorResolveUnknown)
+
+		return AsResult(err)
+	}
+
+	acc.Status.MarkOperatorResolved(v1alpha1.InferredObjectReference{
+		Namespace: operator.Namespace,
+		Name:      operator.Name,
+	})
+
+	result, err = r.reconcileLabels(ctx, acc)
+	if !result.IsZero() || err != nil {
+		return result, err
 	}
 
 	// make sure signing keys for this Account are up-to-date before we try to sign the JWT
@@ -168,7 +195,7 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 		return ctrl.Result{}, err
 	}
 
-	accountJWT, err := r.reconcileJWTSecret(ctx, acc, issuerKP)
+	accountJWT, result, err := r.reconcileJWTSecret(ctx, acc, issuerKP)
 	if err != nil {
 		MarkCondition(err, acc.Status.MarkJWTSecretFailed, acc.Status.MarkJWTSecretUnknown)
 
@@ -177,11 +204,47 @@ func (r *AccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 
 	acc.Status.MarkJWTSecretReady()
 
+	if !result.IsZero() {
+		return result, nil
+	}
+
 	if err := r.ensureJWTPushed(ctx, acc, operator, issuerKP, accountJWT); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *AccountReconciler) validateOperatorSelector(ctx context.Context, operator *v1alpha1.Operator, account *v1alpha1.Account) error {
+	ns, err := r.CoreV1.Namespaces().Get(ctx, account.Namespace, metav1.GetOptions{})
+	if err != nil {
+		return TemporaryError(fmt.Errorf("failed to get account namespace: %w", err))
+	}
+
+	valid, err := helpers.MatchNamespaceSelector(operator, ns, operator.Spec.AccountsNamespaceSelector)
+	if err != nil {
+		return TerminalError(fmt.Errorf("failed to validate operator namespace selector: %w", err))
+	}
+
+	if !valid {
+		return TerminalError(ConditionFailed(v1alpha1.ReasonNotAllowed, "operator.spec.accountsNamespaceSelector does not match account namespace"))
+	}
+
+	if operator.Spec.AccountsSelector == nil {
+		// nothing else to validate, account is allowed.
+		return nil
+	}
+
+	ls, err := metav1.LabelSelectorAsSelector(operator.Spec.AccountsSelector)
+	if err != nil {
+		return TerminalError(fmt.Errorf("failed to parse operator selector: %w", err))
+	}
+
+	if !ls.Matches(labels.Set(account.Labels)) {
+		return TerminalError(ConditionFailed(v1alpha1.ReasonNotAllowed, "operator.spec.accountsSelector does not match account labels"))
+	}
+
+	return nil
 }
 
 // resolveOperator handles the v1alpha1.AccountConditionOperatorResolved condition and updating the
@@ -219,11 +282,6 @@ func (r *AccountReconciler) resolveOperator(ctx context.Context, acc *v1alpha1.A
 
 		return nil, TerminalError(fmt.Errorf("invalid keypair, expected Operator or SigningKey"))
 	}
-
-	acc.Status.MarkOperatorResolved(v1alpha1.InferredObjectReference{
-		Namespace: operator.Namespace,
-		Name:      operator.Name,
-	})
 
 	return operator, nil
 }
@@ -267,7 +325,7 @@ func (r *AccountReconciler) ensureSigningKeysUpdated(ctx context.Context, acc *v
 	return nil
 }
 
-func (r *AccountReconciler) reconcileJWTSecret(ctx context.Context, acc *v1alpha1.Account, issuerKP nkeys.KeyPair) (ajwt string, err error) {
+func (r *AccountReconciler) reconcileJWTSecret(ctx context.Context, acc *v1alpha1.Account, issuerKP nkeys.KeyPair) (ajwt string, result reconcile.Result, err error) {
 	logger := log.FromContext(ctx)
 
 	// we want to check that any existing secret decodes to match wantClaims, if it doesn't then we will use nextJWT
@@ -275,7 +333,7 @@ func (r *AccountReconciler) reconcileJWTSecret(ctx context.Context, acc *v1alpha
 	// timestamped with the `iat` claim so will never match.
 	wantClaims, nextJWT, err := nsc.CreateAccountClaims(acc, issuerKP)
 	if err != nil {
-		return "", TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to create account JWT claims: %w", err))
+		return "", reconcile.Result{}, TerminalError(ConditionFailed(v1alpha1.ReasonUnknownError, "failed to create account JWT claims: %w", err))
 	}
 
 	got, err := r.CoreV1.Secrets(acc.Namespace).Get(ctx, acc.Spec.JWTSecretName, metav1.GetOptions{})
@@ -283,10 +341,10 @@ func (r *AccountReconciler) reconcileJWTSecret(ctx context.Context, acc *v1alpha
 		if errors.IsNotFound(err) {
 			logger.V(1).Info("JWT secret not found, creating new secret")
 
-			return nextJWT, r.createJWTSecret(ctx, acc, nextJWT)
+			return nextJWT, reconcile.Result{Requeue: true}, r.createJWTSecret(ctx, acc, nextJWT)
 		}
 
-		return "", TemporaryError(ConditionUnknown(v1alpha1.ReasonUnknownError, "failed to get JWT secret: %w", err))
+		return "", reconcile.Result{}, TemporaryError(ConditionUnknown(v1alpha1.ReasonUnknownError, "failed to get JWT secret: %w", err))
 	}
 
 	return r.ensureJWTSecretUpToDate(ctx, acc, wantClaims, got, nextJWT)
@@ -554,6 +612,32 @@ func (r *AccountReconciler) loadCAFile(ctx context.Context, ns string, selector 
 	return caFile, nil
 }
 
+func (r *AccountReconciler) reconcileLabels(ctx context.Context, acc *v1alpha1.Account) (reconcile.Result, error) {
+	logger := log.FromContext(ctx)
+
+	if acc.Status.OperatorRef == nil {
+		return reconcile.Result{}, nil
+	}
+
+	if acc.Labels == nil {
+		acc.Labels = make(map[string]string)
+	}
+
+	if acc.Labels[resources.LabelOperatorName] != acc.Status.OperatorRef.Name {
+		acc.Labels[resources.LabelOperatorName] = acc.Status.OperatorRef.Name
+
+		if err := r.Update(ctx, acc); err != nil {
+			logger.Error(err, "failed to update account labels")
+
+			return reconcile.Result{}, err
+		}
+
+		return reconcile.Result{Requeue: true}, nil
+	}
+
+	return reconcile.Result{}, nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.EventRecorder = mgr.GetEventRecorderFor("account-controller")
@@ -562,34 +646,8 @@ func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Account{}).
 		Owns(&v1.Secret{}).
-		Watches(
-			&v1alpha1.SigningKey{},
-			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
-				signingKey, ok := obj.(*v1alpha1.SigningKey)
-				if !ok {
-					logger.Info("SigningKey watcher received non-SigningKey object",
-						"kind", obj.GetObjectKind().GroupVersionKind().String())
-					return nil
-				}
-
-				ownerRef := signingKey.Status.OwnerRef
-				if ownerRef == nil {
-					return nil
-				}
-
-				accountGVK := v1alpha1.GroupVersion.WithKind("Account")
-				if accountGVK != ownerRef.GetGroupVersionKind() {
-					return nil
-				}
-
-				return []reconcile.Request{{
-					NamespacedName: types.NamespacedName{
-						Name:      ownerRef.Name,
-						Namespace: ownerRef.Namespace,
-					},
-				}}
-			}),
-		).
+		Watches(&v1alpha1.SigningKey{}, accountSigningKeyWatcher(logger)).
+		Watches(&v1alpha1.Operator{}, accountOperatorWatcher(logger, mgr.GetClient())).
 		Complete(r)
 
 	if err != nil {
@@ -597,4 +655,72 @@ func (r *AccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return nil
+}
+
+// accountSigningKeyWatcher will enqueue a reconcile of the owning Account if the SigningKey
+// changes. This facilitates the fact that Account.Status embeds references to all signing keys
+// belonging to it and may require an update if a SigningKey changes.
+func accountSigningKeyWatcher(logger logr.Logger) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+		signingKey, ok := obj.(*v1alpha1.SigningKey)
+		if !ok {
+			logger.Info("SigningKey watcher received non-SigningKey object",
+				"kind", obj.GetObjectKind().GroupVersionKind().String())
+			return nil
+		}
+
+		ownerRef := signingKey.Status.OwnerRef
+		if ownerRef == nil {
+			return nil
+		}
+
+		accountGVK := v1alpha1.GroupVersion.WithKind("Account")
+		if accountGVK != ownerRef.GetGroupVersionKind() {
+			return nil
+		}
+
+		return []reconcile.Request{{
+			NamespacedName: types.NamespacedName{
+				Name:      ownerRef.Name,
+				Namespace: ownerRef.Namespace,
+			},
+		}}
+	})
+}
+
+// accountOperatorWatcher will enqueue any Accounts which are managed by this Operator. In reality,
+// this will almost always be every Account in the cluster unless the environment contains multiple
+// Operators.
+func accountOperatorWatcher(logger logr.Logger, c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		operator, ok := obj.(*v1alpha1.Operator)
+		if !ok {
+			logger.Info("Operator watcher received non-Operator object",
+				"kind", obj.GetObjectKind().GroupVersionKind().String())
+			return nil
+		}
+
+		var accountList v1alpha1.AccountList
+
+		if err := c.List(ctx, &accountList, client.MatchingLabels{
+			resources.LabelOperatorName: operator.Name,
+		}); err != nil {
+			logger.Error(err, "failed to list accounts for operator during enqueue handler", "operator", operator.Name)
+
+			return nil
+		}
+
+		requests := make([]reconcile.Request, len(accountList.Items))
+
+		for i, acc := range accountList.Items {
+			requests[i] = reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      acc.Name,
+					Namespace: acc.Namespace,
+				},
+			}
+		}
+
+		return requests
+	})
 }

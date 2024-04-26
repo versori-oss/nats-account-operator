@@ -5,6 +5,7 @@ const (
 	ReasonInvalidSigningKeyOwner   = "InvalidSigningKeyOwner"
 	ReasonNotReady                 = "NotReady"
 	ReasonNotFound                 = "NotFound"
+	ReasonNotAllowed               = "NotAllowed"
 	ReasonUnknownError             = "UnknownError"
 	ReasonMalformedSeedSecret      = "MalformedSeedSecret"
 	ReasonIssuerSeedError          = "IssuerSeedError"
