@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/versori-oss/nats-account-operator/compare/v0.3.0...v0.4.0) (2024-04-26)
+
+
+### Features
+
+* implement namespace and label selectors for restricting Accounts, SigningKeys and Users ([307e65f](https://github.com/versori-oss/nats-account-operator/commit/307e65f5db263dd31c8a2e1ae2a893ce07cfb0d6))
+
+
+### Bug Fixes
+
+* use labels instead of annotations to make filtering via kubectl easier ([a5072ea](https://github.com/versori-oss/nats-account-operator/commit/a5072ea5d5906ccf49767c268fab06b2ee611ce5))
+
 ## [0.3.0](https://github.com/versori-oss/nats-account-operator/compare/v0.2.5...v0.3.0) (2024-04-25)
 
 
